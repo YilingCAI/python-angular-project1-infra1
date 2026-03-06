@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Local .terraform directories
 .terraform/
 
@@ -18,10 +19,42 @@ crash.*.log
 
 # Ignore override files as they are usually used to override resources locally and so
 # are not checked in
+=======
+# ============================================================================
+# Infrastructure/Terraform .gitignore
+# ============================================================================
+# CRITICAL: Never commit .tfstate or terraform.tfvars
+# ============================================================================
+
+# ============================================================================
+# Environment & Secrets
+# ============================================================================
+.env
+.env.local
+.env.*.local
+*.tfvars
+*.tfvars.json
+!example.tfvars
+!*.tfvars.example
+
+# ============================================================================
+# Terraform State
+# ============================================================================
+.terraform/
+terraform.tfstate
+terraform.tfstate.backup
+terraform.tfstate.*.backup
+*_terraform.tfstate
+
+# ============================================================================
+# Terraform Overrides
+# ============================================================================
+>>>>>>> c093ea3 (initial commit)
 override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
+<<<<<<< HEAD
 
 # Ignore transient lock info files created by terraform apply
 .terraform.tfstate.lock.info
@@ -35,3 +68,36 @@ override.tf.json
 # Ignore CLI configuration files
 .terraformrc
 terraform.rc
+=======
+crash.log
+crash.*.log
+
+# ============================================================================
+# Plans & Logs
+# ============================================================================
+*.tfplan
+.terraformrc
+terraform.log
+*.log
+
+# ============================================================================
+# IDE
+# ============================================================================
+.idea/
+.vscode/
+*.code-workspace
+
+# ============================================================================
+# OS
+# ============================================================================
+.DS_Store
+Thumbs.db
+
+# ============================================================================
+# Temp & Artifacts
+# ============================================================================
+*.swp
+*.swo
+*.bak
+.tmp/
+>>>>>>> c093ea3 (initial commit)

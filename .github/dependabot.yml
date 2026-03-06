@@ -1,0 +1,36 @@
+version: 2
+
+updates:
+  - package-ecosystem: "terraform"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "terraform"
+      - "infra"
+    pull-request-branch-name:
+      separator: "/"
+    commit-message:
+      prefix: "build(terraform):"
+      include: "scope"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+      time: "03:00"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "ci"
+      - "infra"
+    pull-request-branch-name:
+      separator: "/"
+    commit-message:
+      prefix: "ci:"
+      include: "scope"
