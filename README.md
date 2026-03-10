@@ -72,6 +72,25 @@ make bootstrap-apply
 
 Bootstrap variables are in `bootstrap/env/bootstrap.tfvars`.
 
+## Local AWS credentials (safe setup)
+
+This repo uses a local file named `.aws.local.env` for bootstrap-related AWS credentials.
+
+1. Create your local file from the template:
+
+```bash
+cp .aws.local.env.example .aws.local.env
+```
+
+2. Edit `.aws.local.env` with real values from your AWS account.
+
+3. If you use temporary credentials, set `AWS_SESSION_TOKEN` as well.
+
+Security note:
+
+- `.aws.local.env` is intentionally gitignored.
+- Never commit real credentials to git history.
+
 ## CI/CD flow
 
 Main workflow: `.github/workflows/terraform.yml`
