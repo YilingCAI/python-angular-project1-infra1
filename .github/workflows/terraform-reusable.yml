@@ -57,8 +57,6 @@ jobs:
     env:
       TF_ENV: ${{ inputs.target_environment }}
       INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
-      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-      TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

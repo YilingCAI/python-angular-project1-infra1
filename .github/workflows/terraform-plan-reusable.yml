@@ -48,8 +48,6 @@ jobs:
     env:
       TF_ENV: ${{ inputs.target_environment }}
       INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
-      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-      TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -62,7 +60,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN_PLAN || secrets.AWS_OIDC_ROLE_ARN || secrets.AWS_ROLE_TO_ASSUME_PLAN || secrets.AWS_ROLE_TO_ASSUME }}
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
           role-session-name: gha-terraform-plan-${{ inputs.target_environment }}-${{ github.run_id }}
           audience: sts.amazonaws.com
