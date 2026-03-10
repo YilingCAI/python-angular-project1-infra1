@@ -118,6 +118,7 @@ Speculative validation plans run in order:
 3. `plan-prod`
 
 These run with `speculative_plan: true` (no saved plan artifact for apply handoff and no state lock).
+Speculative PR plans run without GitHub Environment assignment.
 
 Plan checks include:
 
@@ -141,6 +142,8 @@ Real promotion plans run in order:
 1. `plan-dev-main`
 2. `plan-staging-main` (after `plan-dev-main`)
 3. `plan-prod-main` (after `plan-staging-main`)
+
+Real main-branch plans keep GitHub Environment assignment (`dev`, `staging`, `prod`).
 
 Then promotion applies run in order:
 

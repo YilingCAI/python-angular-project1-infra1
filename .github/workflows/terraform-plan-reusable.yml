@@ -51,7 +51,53 @@ permissions:
   pull-requests: write
 
 jobs:
+  terraform-plan-speculative:
+    if: inputs.speculative_plan
+    name: Terraform Plan ${{ inputs.target_environment }} (speculative)
+    runs-on: ubuntu-latest
+    concurrency:
+      group: terraform-state-${{ inputs.target_environment }}
+      cancel-in-progress: false
+    env:
+      TF_ENV: ${{ inputs.target_environment }}
+      INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Terraform common setup and checks
+        uses: ./.github/actions/terraform-common
+        with:
+          target_environment: ${{ inputs.target_environment }}
+          operation: plan
+          aws_region: ${{ vars.AWS_REGION }}
+          terraform_state_bucket: ${{ secrets.TERRAFORM_STATE_BUCKET }}
+          jwt_secret_key: ${{ secrets.JWT_SECRET_KEY }}
+          enable_security_checks: ${{ inputs.enable_security_checks }}
+          checkov_enforcement: ${{ inputs.checkov_enforcement }}
+          aws_oidc_role_arn: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          role_session_name_prefix: gha-terraform-plan
+
+      - name: Terraform shared plan steps
+        uses: ./.github/actions/terraform-plan-common
+        with:
+          target_environment: ${{ inputs.target_environment }}
+          speculative_plan: true
+          enable_infracost: ${{ inputs.enable_infracost }}
+          infracost_api_key: ${{ secrets.INFRACOST_API_KEY }}
+          enable_pr_comment: ${{ inputs.enable_pr_comment }}
+
+      - name: Workflow summary
+        if: always()
+        shell: bash
+        run: |
+          echo "## Terraform Workflow Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Environment: ${TF_ENV}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Operation: plan (speculative)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Status: ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
+
   terraform-plan:
+    if: ${{ !inputs.speculative_plan }}
     name: Terraform Plan ${{ inputs.target_environment }}
     runs-on: ubuntu-latest
     concurrency:
@@ -82,7 +128,7 @@ jobs:
         uses: ./.github/actions/terraform-plan-common
         with:
           target_environment: ${{ inputs.target_environment }}
-          speculative_plan: ${{ inputs.speculative_plan }}
+          speculative_plan: false
           enable_infracost: ${{ inputs.enable_infracost }}
           infracost_api_key: ${{ secrets.INFRACOST_API_KEY }}
           enable_pr_comment: ${{ inputs.enable_pr_comment }}
