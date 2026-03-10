@@ -2,13 +2,6 @@ data "aws_caller_identity" "current" {}
 
 data "aws_partition" "current" {}
 
-check "expected_account_id" {
-  assert {
-    condition     = var.expected_account_id == "" || data.aws_caller_identity.current.account_id == var.expected_account_id
-    error_message = "AWS account mismatch: expected ${var.expected_account_id}, but authenticated as ${data.aws_caller_identity.current.account_id}. Update credentials in .aws.local.env or expected_account_id in bootstrap tfvars."
-  }
-}
-
 locals {
   account_id         = data.aws_caller_identity.current.account_id
   backend_repo_name  = "${var.project_name}/backend"
@@ -18,13 +11,6 @@ locals {
     for env in var.environments :
     env => lookup(var.state_bucket_names, env, "") != "" ? lookup(var.state_bucket_names, env, "") : "${local.project_slug}-tfstate-${env}-${local.account_id}"
   }
-
-  lock_table_names = {
-    for env in var.environments :
-    env => lookup(var.lock_table_names, env, "") != "" ? lookup(var.lock_table_names, env, "") : "${var.project_name}-terraform-lock-${env}"
-  }
-
-  effective_shared_lock = var.shared_lock_table_name != "" ? var.shared_lock_table_name : "${var.project_name}-terraform-lock"
 
   ecr_actions = ["ecr:*"]
 
@@ -49,14 +35,6 @@ locals {
     "s3:PutBucketEncryption",
     "s3:PutBucketVersioning",
     "s3:PutObject"
-  ]
-
-  lock_table_actions = [
-    "dynamodb:DeleteItem",
-    "dynamodb:DescribeTable",
-    "dynamodb:GetItem",
-    "dynamodb:PutItem",
-    "dynamodb:UpdateItem"
   ]
 
   github_oidc_provider_arn = aws_iam_openid_connect_provider.github.arn
@@ -101,41 +79,6 @@ resource "aws_s3_bucket_public_access_block" "terraform_state" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
-}
-
-resource "aws_dynamodb_table" "terraform_lock" {
-  for_each     = var.create_lock_table && var.lock_table_scope == "per_env" ? local.lock_table_names : {}
-  name         = each.value
-  billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "LockID"
-
-  attribute {
-    name = "LockID"
-    type = "S"
-  }
-
-  tags = {
-    Name        = each.value
-    Environment = each.key
-    Purpose     = "terraform-lock-legacy"
-  }
-}
-
-resource "aws_dynamodb_table" "terraform_lock_shared" {
-  count        = var.create_lock_table && var.lock_table_scope == "shared" ? 1 : 0
-  name         = local.effective_shared_lock
-  billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "LockID"
-
-  attribute {
-    name = "LockID"
-    type = "S"
-  }
-
-  tags = {
-    Name    = local.effective_shared_lock
-    Purpose = "terraform-lock-shared"
-  }
 }
 
 resource "aws_ecr_repository" "backend" {
@@ -242,16 +185,6 @@ data "aws_iam_policy_document" "github_actions_permissions" {
       [for bucket in values(aws_s3_bucket.terraform_state) : bucket.arn],
       [for bucket in values(aws_s3_bucket.terraform_state) : "${bucket.arn}/*"]
     )
-  }
-
-  statement {
-    sid       = "LegacyLockTable"
-    effect    = "Allow"
-    actions   = local.lock_table_actions
-    resources = var.create_lock_table ? concat(
-      [for t in values(aws_dynamodb_table.terraform_lock) : t.arn],
-      aws_dynamodb_table.terraform_lock_shared[*].arn
-    ) : ["*"]
   }
 
   statement {

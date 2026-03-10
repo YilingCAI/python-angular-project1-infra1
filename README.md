@@ -9,7 +9,7 @@ Terraform infrastructure repository for AWS networking, compute, database, and d
 - ECS cluster and services for backend/frontend
 - RDS PostgreSQL
 - IAM/OIDC resources for GitHub Actions deployment
-- S3 + DynamoDB Terraform state/locking resources
+- S3 Terraform state resources
 
 ## Repository layout
 
@@ -37,16 +37,21 @@ Terraform infrastructure repository for AWS networking, compute, database, and d
 │   ├── terraform.yml
 │   ├── terraform-plan-reusable.yml
 │   └── terraform-reusable.yml
+├── .github/actions/
+│   ├── terraform-common/
+│   │   └── action.yml
+│   └── terraform-plan-common/
+│       └── action.yml
 └── Makefile
 ```
 
 ## State and locking model
 
-Each environment uses isolated remote state and lock table:
+Each environment uses isolated remote state in S3 with backend lockfiles enabled:
 
-- `dev`: `mypythonproject1-tfstate-dev` + `mypythonproject1-terraform-lock-dev`
-- `staging`: `mypythonproject1-tfstate-staging` + `mypythonproject1-terraform-lock-staging`
-- `prod`: `mypythonproject1-tfstate-prod` + `mypythonproject1-terraform-lock-prod`
+- `dev`: `mypythonproject1-tfstate-dev`
+- `staging`: `mypythonproject1-tfstate-staging`
+- `prod`: `mypythonproject1-tfstate-prod`
 
 `backend.hcl` files are rendered during CI and for local use contain:
 
@@ -54,13 +59,13 @@ Each environment uses isolated remote state and lock table:
 bucket         = "<env-state-bucket>"
 key            = "<env>/terraform.tfstate"
 region         = "us-east-1"
-dynamodb_table = "mypythonproject1-terraform-lock-<env>"
+use_lockfile   = true
 encrypt        = true
 ```
 
 ## Bootstrap (per AWS account)
 
-Bootstrap creates shared foundation resources (state buckets, lock tables, OIDC role/provider, ECR repos).
+Bootstrap creates shared foundation resources (state buckets, OIDC role/provider, ECR repos).
 
 Run from repo root:
 
@@ -95,6 +100,11 @@ Security note:
 
 Main workflow: `.github/workflows/terraform.yml`
 
+Shared workflow logic is implemented with composite actions:
+
+- `.github/actions/terraform-common/action.yml`: Terraform setup, AWS OIDC auth, backend render, init/validate, optional security checks.
+- `.github/actions/terraform-plan-common/action.yml`: Terraform plan, optional Infracost, plan artifact upload, optional PR comment.
+
 ### PR opened to `main`
 
 Promotion-style validation plans run in order:
@@ -107,8 +117,9 @@ Plan checks include:
 
 - `terraform fmt -check`
 - `terraform validate`
+- `checkov`
 - `tflint`
-- `tfsec`
+- `trivy`
 - `terraform plan`
 
 ### After PR merge (`push` to `main`)
@@ -122,7 +133,7 @@ Promotion applies run in order:
 Approval gates are controlled by GitHub Environments:
 
 - `staging` environment approval gates `apply-staging`
-- `production` environment approval gates `apply-prod`
+- `prod` environment approval gates `apply-prod`
 
 ### Nightly drift detection
 
@@ -149,16 +160,14 @@ Repository/environment secrets:
 - `TERRAFORM_STATE_BUCKET`
 - `JWT_SECRET_KEY`
 - `INFRACOST_API_KEY` (optional)
-- `SLACK_WEBHOOK_URL` (optional)
-- `TEAMS_WEBHOOK_URL` (optional)
 
 Create GitHub Environments:
 
 - `dev`
 - `staging`
-- `production`
+- `prod`
 
-Configure required reviewers on `staging` and `production` for controlled promotion.
+Configure required reviewers on `staging` and `prod` for controlled promotion.
 
 ## Local validation
 

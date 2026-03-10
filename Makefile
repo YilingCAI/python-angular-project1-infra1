@@ -66,7 +66,6 @@ bootstrap-import-existing:
 		  TF_DATA_DIR="$(TF_DATA_DIR)" $(TERRAFORM) import -var-file="$(BOOTSTRAP_TFVARS_REL)" "aws_s3_bucket_versioning.terraform_state[\"$$env\"]" "mypythonproject1-tfstate-$$env" >/dev/null 2>&1 || true; \
 		  TF_DATA_DIR="$(TF_DATA_DIR)" $(TERRAFORM) import -var-file="$(BOOTSTRAP_TFVARS_REL)" "aws_s3_bucket_server_side_encryption_configuration.terraform_state[\"$$env\"]" "mypythonproject1-tfstate-$$env" >/dev/null 2>&1 || true; \
 		  TF_DATA_DIR="$(TF_DATA_DIR)" $(TERRAFORM) import -var-file="$(BOOTSTRAP_TFVARS_REL)" "aws_s3_bucket_public_access_block.terraform_state[\"$$env\"]" "mypythonproject1-tfstate-$$env" >/dev/null 2>&1 || true; \
-		  TF_DATA_DIR="$(TF_DATA_DIR)" $(TERRAFORM) import -var-file="$(BOOTSTRAP_TFVARS_REL)" "aws_dynamodb_table.terraform_lock[\"$$env\"]" "mypythonproject1-terraform-lock-$$env" >/dev/null 2>&1 || true; \
 		done; \
 		TF_DATA_DIR="$(TF_DATA_DIR)" $(TERRAFORM) import -var-file="$(BOOTSTRAP_TFVARS_REL)" aws_ecr_repository.backend mypythonproject1/backend >/dev/null 2>&1 || true; \
 		TF_DATA_DIR="$(TF_DATA_DIR)" $(TERRAFORM) import -var-file="$(BOOTSTRAP_TFVARS_REL)" aws_ecr_repository.frontend mypythonproject1/frontend >/dev/null 2>&1 || true; \

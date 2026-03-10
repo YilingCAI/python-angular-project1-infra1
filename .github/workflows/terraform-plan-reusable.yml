@@ -52,165 +52,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - name: Terraform common setup and checks
+        uses: ./.github/actions/terraform-common
         with:
-          terraform_version: 1.8.5
+          target_environment: ${{ inputs.target_environment }}
+          operation: plan
+          aws_region: ${{ vars.AWS_REGION }}
+          terraform_state_bucket: ${{ secrets.TERRAFORM_STATE_BUCKET }}
+          jwt_secret_key: ${{ secrets.JWT_SECRET_KEY }}
+          enable_security_checks: ${{ inputs.enable_security_checks }}
+          aws_oidc_role_arn_plan: ${{ secrets.AWS_OIDC_ROLE_ARN_PLAN }}
+          aws_oidc_role_arn: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          aws_role_to_assume_plan: ${{ secrets.AWS_ROLE_TO_ASSUME_PLAN }}
+          aws_role_to_assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          role_session_name_prefix: gha-terraform-plan
 
-      - name: Resolve AWS role ARN
-        id: role
-        shell: bash
-        env:
-          AWS_OIDC_ROLE_ARN_PLAN: ${{ secrets.AWS_OIDC_ROLE_ARN_PLAN }}
-          AWS_OIDC_ROLE_ARN: ${{ secrets.AWS_OIDC_ROLE_ARN }}
-          AWS_ROLE_TO_ASSUME_PLAN: ${{ secrets.AWS_ROLE_TO_ASSUME_PLAN }}
-          AWS_ROLE_TO_ASSUME: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-        run: |
-          ROLE_ARN="${AWS_OIDC_ROLE_ARN_PLAN:-${AWS_OIDC_ROLE_ARN:-${AWS_ROLE_TO_ASSUME_PLAN:-${AWS_ROLE_TO_ASSUME:-}}}}"
-
-          if [ -z "$ROLE_ARN" ]; then
-            echo "Missing AWS role secret. Set one of AWS_OIDC_ROLE_ARN_PLAN, AWS_OIDC_ROLE_ARN, AWS_ROLE_TO_ASSUME_PLAN, AWS_ROLE_TO_ASSUME." >&2
-            exit 1
-          fi
-
-          if ! printf '%s' "$ROLE_ARN" | grep -Eq '^arn:aws:iam::[0-9]{12}:role/.+'; then
-            echo "Configured role ARN is invalid. Ensure the secret value is a full IAM role ARN like arn:aws:iam::123456789012:role/GitHubActionsRole." >&2
-            exit 1
-          fi
-
-          echo "role_arn=$ROLE_ARN" >> "$GITHUB_OUTPUT"
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Terraform shared plan steps
+        uses: ./.github/actions/terraform-plan-common
         with:
-          role-to-assume: ${{ steps.role.outputs.role_arn }}
-          aws-region: ${{ vars.AWS_REGION }}
-          role-session-name: gha-terraform-plan-${{ inputs.target_environment }}-${{ github.run_id }}
-          audience: sts.amazonaws.com
-
-      - name: Export sensitive Terraform vars
-        run: echo "TF_VAR_jwt_secret_key=${{ secrets.JWT_SECRET_KEY }}" >> "$GITHUB_ENV"
-
-      - name: Render backend config
-        run: |
-          cat > environments/${TF_ENV}/backend.hcl <<'EOF'
-          bucket         = "${{ secrets.TERRAFORM_STATE_BUCKET }}"
-          region         = "${{ vars.AWS_REGION }}"
-          dynamodb_table = "mypythonproject1-terraform-lock-${TF_ENV}"
-          encrypt        = true
-          EOF
-
-      - name: Terraform fmt
-        if: inputs.enable_security_checks
-        run: terraform -chdir="environments/${TF_ENV}" fmt -check -recursive
-
-      - name: Terraform init
-        run: |
-          terraform -chdir="environments/${TF_ENV}" init \
-            -backend-config=backend.hcl \
-            -backend-config="key=${TF_ENV}/terraform.tfstate" \
-            -upgrade
-
-      - name: Terraform validate
-        run: terraform -chdir="environments/${TF_ENV}" validate
-
-      - name: Run Checkov scan
-        if: inputs.enable_security_checks
-        run: |
-          docker run --rm \
-            -v "$PWD":/tf \
-            bridgecrew/checkov:latest \
-            -d /tf \
-            --framework terraform \
-            --quiet
-
-      - name: Setup TFLint
-        if: inputs.enable_security_checks
-        uses: terraform-linters/setup-tflint@v4
-        with:
-          tflint_version: v0.55.1
-
-      - name: Run TFLint
-        if: inputs.enable_security_checks
-        run: |
-          tflint --chdir="environments/${TF_ENV}" --init
-          tflint --chdir="environments/${TF_ENV}" --format compact
-
-      - name: Dependency vulnerability scan
-        if: inputs.enable_security_checks
-        uses: aquasecurity/trivy-action@0.24.0
-        with:
-          scan-type: fs
-          scan-ref: .
-          scanners: vuln
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          format: table
-
-      - name: Terraform plan
-        run: |
-          terraform -chdir="environments/${TF_ENV}" plan \
-            -var-file="terraform.tfvars" \
-            -out="tfplan.binary" \
-            -no-color 2>&1 | tee "environments/${TF_ENV}/plan-output.txt"
-
-      - name: Setup Infracost
-        if: inputs.enable_infracost && env.INFRACOST_API_KEY != ''
-        uses: infracost/actions/setup@v3
-        with:
-          api-key: ${{ env.INFRACOST_API_KEY }}
-
-      - name: Infracost breakdown
-        if: inputs.enable_infracost && env.INFRACOST_API_KEY != ''
-        run: |
-          infracost breakdown \
-            --path="environments/${TF_ENV}" \
-            --terraform-plan-flags="-var-file=terraform.tfvars" \
-            --format=json \
-            --out-file="environments/${TF_ENV}/infracost.json"
-
-      - name: Upload plan artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: terraform-plan-${{ inputs.target_environment }}
-          path: |
-            environments/${TF_ENV}/plan-output.txt
-            environments/${TF_ENV}/tfplan.binary
-            environments/${TF_ENV}/infracost.json
-
-      - name: Post plan to PR
-        if: inputs.enable_pr_comment && github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const bodyPlan = fs.readFileSync('environments/${{ env.TF_ENV }}/plan-output.txt', 'utf8').substring(0, 65000);
-            const marker = '## Terraform Plan (${{ env.TF_ENV }})';
-            const body = `${marker}\n\n\`\`\`hcl\n${bodyPlan}\n\`\`\``;
-
-            const comments = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-
-            const existing = comments.data.find(c => c.user?.type === 'Bot' && c.body?.startsWith(marker));
-
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body,
-              });
-            }
+          target_environment: ${{ inputs.target_environment }}
+          enable_infracost: ${{ inputs.enable_infracost }}
+          infracost_api_key: ${{ secrets.INFRACOST_API_KEY }}
+          enable_pr_comment: ${{ inputs.enable_pr_comment }}
 
       - name: Workflow summary
         if: always()

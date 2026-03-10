@@ -65,7 +65,7 @@ jobs:
     uses: ./.github/workflows/terraform-reusable.yml
     with:
       target_environment: prod
-      github_environment: production
+      github_environment: prod
       operation: drift
       fail_on_drift: true
     secrets: inherit
@@ -99,7 +99,7 @@ jobs:
     uses: ./.github/workflows/terraform-plan-reusable.yml
     with:
       target_environment: prod
-      github_environment: production
+      github_environment: prod
       enable_security_checks: true
       enable_pr_comment: false
       enable_infracost: true
@@ -130,6 +130,6 @@ jobs:
     uses: ./.github/workflows/terraform-reusable.yml
     with:
       target_environment: prod
-      github_environment: production
+      github_environment: prod
       operation: apply
     secrets: inherit

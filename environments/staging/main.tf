@@ -23,7 +23,7 @@ terraform {
   #     -backend-config="bucket=$TERRAFORM_STATE_BUCKET" \
   #     -backend-config="key=<environment>/terraform.tfstate" \
   #     -backend-config="region=$AWS_REGION" \
-  #     -backend-config="dynamodb_table=$TERRAFORM_LOCK_TABLE"
+  #     -backend-config="use_lockfile=true"
   #
   # Local development: run `terraform init -backend=false` to skip remote state.
   backend "s3" {

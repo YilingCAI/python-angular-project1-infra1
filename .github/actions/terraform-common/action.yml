@@ -1,0 +1,154 @@
+name: Terraform Common Setup
+
+description: Shared Terraform setup, AWS auth, backend render, init/validate, and optional security checks.
+
+inputs:
+  target_environment:
+    description: Terraform target environment (dev/staging/prod)
+    required: true
+  operation:
+    description: Terraform operation (plan/drift/apply)
+    required: true
+  aws_region:
+    description: AWS region used for auth and backend config
+    required: true
+  terraform_state_bucket:
+    description: Terraform state bucket name
+    required: true
+  jwt_secret_key:
+    description: JWT secret injected as TF_VAR_jwt_secret_key
+    required: true
+  enable_security_checks:
+    description: Run fmt/checkov/tflint/trivy checks
+    required: false
+    default: "false"
+  aws_oidc_role_arn_plan:
+    description: Plan/drift role ARN
+    required: false
+    default: ""
+  aws_oidc_role_arn:
+    description: Apply/default role ARN
+    required: false
+    default: ""
+  aws_role_to_assume_plan:
+    description: Legacy plan/drift role ARN fallback
+    required: false
+    default: ""
+  aws_role_to_assume:
+    description: Legacy apply/default role ARN fallback
+    required: false
+    default: ""
+  role_session_name_prefix:
+    description: Prefix for AWS role session name
+    required: false
+    default: gha-terraform
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.8.5
+
+    - name: Resolve AWS role ARN
+      id: role
+      shell: bash
+      env:
+        OPERATION: ${{ inputs.operation }}
+        AWS_OIDC_ROLE_ARN_PLAN: ${{ inputs.aws_oidc_role_arn_plan }}
+        AWS_OIDC_ROLE_ARN: ${{ inputs.aws_oidc_role_arn }}
+        AWS_ROLE_TO_ASSUME_PLAN: ${{ inputs.aws_role_to_assume_plan }}
+        AWS_ROLE_TO_ASSUME: ${{ inputs.aws_role_to_assume }}
+      run: |
+        if [ "$OPERATION" = "apply" ]; then
+          ROLE_ARN="${AWS_OIDC_ROLE_ARN:-${AWS_ROLE_TO_ASSUME:-}}"
+        else
+          ROLE_ARN="${AWS_OIDC_ROLE_ARN_PLAN:-${AWS_OIDC_ROLE_ARN:-${AWS_ROLE_TO_ASSUME_PLAN:-${AWS_ROLE_TO_ASSUME:-}}}}"
+        fi
+
+        if [ -z "$ROLE_ARN" ]; then
+          echo "Missing AWS role secret for operation '$OPERATION'." >&2
+          exit 1
+        fi
+
+        if ! printf '%s' "$ROLE_ARN" | grep -Eq '^arn:aws:iam::[0-9]{12}:role/.+'; then
+          echo "Configured role ARN is invalid. Ensure the secret value is a full IAM role ARN like arn:aws:iam::123456789012:role/GitHubActionsRole." >&2
+          exit 1
+        fi
+
+        echo "role_arn=$ROLE_ARN" >> "$GITHUB_OUTPUT"
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ steps.role.outputs.role_arn }}
+        aws-region: ${{ inputs.aws_region }}
+        role-session-name: ${{ inputs.role_session_name_prefix }}-${{ inputs.target_environment }}-${{ github.run_id }}
+        audience: sts.amazonaws.com
+
+    - name: Export sensitive Terraform vars
+      shell: bash
+      run: echo "TF_VAR_jwt_secret_key=${{ inputs.jwt_secret_key }}" >> "$GITHUB_ENV"
+
+    - name: Render backend config
+      shell: bash
+      run: |
+        cat > environments/${{ inputs.target_environment }}/backend.hcl <<EOF
+        bucket         = "${{ inputs.terraform_state_bucket }}"
+        region         = "${{ inputs.aws_region }}"
+        use_lockfile   = true
+        encrypt        = true
+        EOF
+
+    - name: Terraform fmt
+      if: ${{ inputs.enable_security_checks == 'true' }}
+      shell: bash
+      run: terraform -chdir="environments/${{ inputs.target_environment }}" fmt -check -recursive
+
+    - name: Terraform init
+      shell: bash
+      run: |
+        terraform -chdir="environments/${{ inputs.target_environment }}" init \
+          -backend-config=backend.hcl \
+          -backend-config="key=${{ inputs.target_environment }}/terraform.tfstate" \
+          -upgrade
+
+    - name: Terraform validate
+      shell: bash
+      run: terraform -chdir="environments/${{ inputs.target_environment }}" validate
+
+    - name: Run Checkov scan
+      if: ${{ inputs.enable_security_checks == 'true' }}
+      shell: bash
+      run: |
+        docker run --rm \
+          -v "$PWD":/tf \
+          bridgecrew/checkov:latest \
+          -d /tf \
+          --framework terraform \
+          --quiet
+
+    - name: Setup TFLint
+      if: ${{ inputs.enable_security_checks == 'true' }}
+      uses: terraform-linters/setup-tflint@v4
+      with:
+        tflint_version: v0.55.1
+
+    - name: Run TFLint
+      if: ${{ inputs.enable_security_checks == 'true' }}
+      shell: bash
+      run: |
+        tflint --chdir="environments/${{ inputs.target_environment }}" --init
+        tflint --chdir="environments/${{ inputs.target_environment }}" --format compact
+
+    - name: Dependency vulnerability scan
+      if: ${{ inputs.enable_security_checks == 'true' }}
+      uses: aquasecurity/trivy-action@0.24.0
+      with:
+        scan-type: fs
+        scan-ref: .
+        scanners: vuln
+        severity: HIGH,CRITICAL
+        ignore-unfixed: true
+        format: table

@@ -49,35 +49,6 @@ variable "state_bucket_names" {
   default     = {}
 }
 
-variable "create_lock_table" {
-  description = "Create DynamoDB lock table for backward compatibility"
-  type        = bool
-  default     = true
-}
-
-variable "lock_table_scope" {
-  description = "Lock table scope: per_env creates one lock table per environment name, shared uses one common lock table name."
-  type        = string
-  default     = "per_env"
-
-  validation {
-    condition     = contains(["per_env", "shared"], var.lock_table_scope)
-    error_message = "lock_table_scope must be one of: per_env, shared."
-  }
-}
-
-variable "lock_table_names" {
-  description = "Optional per-environment lock table name overrides when lock_table_scope=per_env"
-  type        = map(string)
-  default     = {}
-}
-
-variable "shared_lock_table_name" {
-  description = "Optional shared lock table name when lock_table_scope=shared."
-  type        = string
-  default     = ""
-}
-
 variable "oidc_thumbprints" {
   description = "Thumbprints for GitHub OIDC provider"
   type        = list(string)
