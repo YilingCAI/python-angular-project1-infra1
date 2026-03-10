@@ -13,7 +13,7 @@ on:
         type: string
         default: ""
       operation:
-        description: Terraform operation to run
+        description: Terraform operation to run (drift/apply)
         required: true
         type: string
       enable_security_checks:
@@ -26,16 +26,6 @@ on:
         required: false
         type: string
         default: advisory
-      enable_pr_comment:
-        description: Post plan comment to PR
-        required: false
-        type: boolean
-        default: false
-      enable_infracost:
-        description: Run Infracost when API key exists
-        required: false
-        type: boolean
-        default: false
       fail_on_drift:
         description: Fail workflow when drift is detected
         required: false
@@ -56,8 +46,6 @@ on:
         required: true
       TERRAFORM_STATE_BUCKET:
         required: true
-      INFRACOST_API_KEY:
-        required: false
 
 permissions:
   contents: read
@@ -74,7 +62,6 @@ jobs:
     environment: ${{ inputs.github_environment != '' && inputs.github_environment || inputs.target_environment }}
     env:
       TF_ENV: ${{ inputs.target_environment }}
-      INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -91,15 +78,6 @@ jobs:
           checkov_enforcement: ${{ inputs.checkov_enforcement }}
           aws_oidc_role_arn: ${{ secrets.AWS_OIDC_ROLE_ARN }}
           role_session_name_prefix: gha-terraform
-
-      - name: Terraform shared plan steps
-        if: inputs.operation == 'plan'
-        uses: ./.github/actions/terraform-plan-common
-        with:
-          target_environment: ${{ inputs.target_environment }}
-          enable_infracost: ${{ inputs.enable_infracost }}
-          infracost_api_key: ${{ secrets.INFRACOST_API_KEY }}
-          enable_pr_comment: ${{ inputs.enable_pr_comment }}
 
       - name: Detect Terraform var-file
         if: inputs.operation == 'drift' || inputs.operation == 'apply'

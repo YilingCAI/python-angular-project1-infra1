@@ -78,6 +78,7 @@ jobs:
       enable_security_checks: true
       checkov_enforcement: advisory
       speculative_plan: true
+      terraform_init_backend: false
       enable_pr_comment: true
       enable_infracost: true
     secrets: inherit
@@ -91,6 +92,7 @@ jobs:
       enable_security_checks: true
       checkov_enforcement: advisory
       speculative_plan: true
+      terraform_init_backend: false
       enable_pr_comment: false
       enable_infracost: true
     secrets: inherit
@@ -104,6 +106,7 @@ jobs:
       enable_security_checks: true
       checkov_enforcement: advisory
       speculative_plan: true
+      terraform_init_backend: false
       enable_pr_comment: false
       enable_infracost: true
     secrets: inherit

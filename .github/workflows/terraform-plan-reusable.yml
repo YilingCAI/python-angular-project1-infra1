@@ -27,6 +27,11 @@ on:
         required: false
         type: boolean
         default: false
+      terraform_init_backend:
+        description: Initialize Terraform with backend enabled (true) or disabled (false)
+        required: false
+        type: boolean
+        default: true
       enable_pr_comment:
         description: Post plan comment to PR
         required: false
@@ -72,7 +77,7 @@ jobs:
           operation: plan
           aws_region: ${{ vars.AWS_REGION }}
           terraform_state_bucket: ${{ secrets.TERRAFORM_STATE_BUCKET }}
-          terraform_init_backend: ${{ !inputs.speculative_plan }}
+          terraform_init_backend: ${{ inputs.terraform_init_backend }}
           aws_auth_required: ${{ !inputs.speculative_plan }}
           jwt_secret_key: ${{ secrets.JWT_SECRET_KEY }}
           enable_security_checks: ${{ inputs.enable_security_checks }}
