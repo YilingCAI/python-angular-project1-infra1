@@ -127,7 +127,6 @@ jobs:
             echo "Saved plan file not found at environments/${TF_ENV}/tfplan.binary" >&2
             exit 1
           }
-          fi
 
       - name: Terraform drift plan
         if: inputs.operation == 'drift'

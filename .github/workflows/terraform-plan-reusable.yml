@@ -52,7 +52,7 @@ permissions:
 
 jobs:
   terraform-plan-speculative:
-    if: inputs.speculative_plan
+    if: ${{ inputs.speculative_plan }}
     name: Terraform Plan ${{ inputs.target_environment }} (speculative)
     runs-on: ubuntu-latest
     concurrency:
