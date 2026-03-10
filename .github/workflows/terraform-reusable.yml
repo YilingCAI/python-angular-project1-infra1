@@ -58,6 +58,9 @@ jobs:
   terraform:
     name: Terraform ${{ inputs.target_environment }} (${{ inputs.operation }})
     runs-on: ubuntu-latest
+    concurrency:
+      group: terraform-state-${{ inputs.target_environment }}
+      cancel-in-progress: false
     environment: ${{ inputs.github_environment != '' && inputs.github_environment || inputs.target_environment }}
     env:
       TF_ENV: ${{ inputs.target_environment }}
