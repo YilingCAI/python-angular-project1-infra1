@@ -169,21 +169,24 @@ runs:
       shell: bash
       run: terraform -chdir="environments/${{ inputs.target_environment }}" fmt -check -recursive
 
-    - name: Terraform init
+    - name: Terraform init (backend)
+      if: ${{ inputs.terraform_init_backend == 'true' }}
       shell: bash
       run: |
-        if [ "${{ inputs.terraform_init_backend }}" = "true" ]; then
-          terraform -chdir="environments/${{ inputs.target_environment }}" init \
-            -backend-config=backend.hcl \
-            -backend-config="key=${{ inputs.target_environment }}/terraform.tfstate" \
-            -reconfigure \
-            -upgrade
-        else
-          terraform -chdir="environments/${{ inputs.target_environment }}" init \
-            -backend=false \
-            -reconfigure \
-            -upgrade
-        fi
+        terraform -chdir="environments/${{ inputs.target_environment }}" init \
+          -backend-config=backend.hcl \
+          -backend-config="key=${{ inputs.target_environment }}/terraform.tfstate" \
+          -reconfigure \
+          -upgrade
+
+    - name: Terraform init (speculative)
+      if: ${{ inputs.terraform_init_backend != 'true' }}
+      shell: bash
+      run: |
+        terraform -chdir="environments/${{ inputs.target_environment }}" init \
+          -backend=false \
+          -reconfigure \
+          -upgrade
 
     - name: Terraform validate
       shell: bash
