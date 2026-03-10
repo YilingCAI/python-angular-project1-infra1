@@ -66,10 +66,38 @@ jobs:
         with:
           terraform_version: 1.8.5
 
+      - name: Resolve AWS role ARN
+        id: role
+        shell: bash
+        env:
+          OPERATION: ${{ inputs.operation }}
+          AWS_OIDC_ROLE_ARN_PLAN: ${{ secrets.AWS_OIDC_ROLE_ARN_PLAN }}
+          AWS_OIDC_ROLE_ARN: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          AWS_ROLE_TO_ASSUME_PLAN: ${{ secrets.AWS_ROLE_TO_ASSUME_PLAN }}
+          AWS_ROLE_TO_ASSUME: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+        run: |
+          if [ "$OPERATION" = "apply" ]; then
+            ROLE_ARN="${AWS_OIDC_ROLE_ARN:-${AWS_ROLE_TO_ASSUME:-}}"
+          else
+            ROLE_ARN="${AWS_OIDC_ROLE_ARN_PLAN:-${AWS_OIDC_ROLE_ARN:-${AWS_ROLE_TO_ASSUME_PLAN:-${AWS_ROLE_TO_ASSUME:-}}}}"
+          fi
+
+          if [ -z "$ROLE_ARN" ]; then
+            echo "Missing AWS role secret for operation '$OPERATION'." >&2
+            exit 1
+          fi
+
+          if ! printf '%s' "$ROLE_ARN" | grep -Eq '^arn:aws:iam::[0-9]{12}:role/.+'; then
+            echo "Configured role ARN is invalid. Ensure the secret value is a full IAM role ARN like arn:aws:iam::123456789012:role/GitHubActionsRole." >&2
+            exit 1
+          fi
+
+          echo "role_arn=$ROLE_ARN" >> "$GITHUB_OUTPUT"
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ (inputs.operation == 'apply' && (secrets.AWS_OIDC_ROLE_ARN || secrets.AWS_ROLE_TO_ASSUME)) || (secrets.AWS_OIDC_ROLE_ARN_PLAN || secrets.AWS_OIDC_ROLE_ARN || secrets.AWS_ROLE_TO_ASSUME_PLAN || secrets.AWS_ROLE_TO_ASSUME) }}
+          role-to-assume: ${{ steps.role.outputs.role_arn }}
           aws-region: ${{ vars.AWS_REGION }}
           role-session-name: gha-terraform-${{ inputs.target_environment }}-${{ github.run_id }}
           audience: sts.amazonaws.com
