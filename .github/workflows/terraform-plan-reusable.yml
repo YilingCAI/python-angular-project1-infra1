@@ -72,6 +72,7 @@ jobs:
           operation: plan
           aws_region: ${{ vars.AWS_REGION }}
           terraform_state_bucket: ${{ secrets.TERRAFORM_STATE_BUCKET }}
+          terraform_init_backend: false
           jwt_secret_key: ${{ secrets.JWT_SECRET_KEY }}
           enable_security_checks: ${{ inputs.enable_security_checks }}
           checkov_enforcement: ${{ inputs.checkov_enforcement }}
@@ -118,6 +119,7 @@ jobs:
           operation: plan
           aws_region: ${{ vars.AWS_REGION }}
           terraform_state_bucket: ${{ secrets.TERRAFORM_STATE_BUCKET }}
+          terraform_init_backend: true
           jwt_secret_key: ${{ secrets.JWT_SECRET_KEY }}
           enable_security_checks: ${{ inputs.enable_security_checks }}
           checkov_enforcement: ${{ inputs.checkov_enforcement }}

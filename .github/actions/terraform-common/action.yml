@@ -15,6 +15,10 @@ inputs:
   terraform_state_bucket:
     description: Terraform state bucket name
     required: true
+  terraform_init_backend:
+    description: Initialize Terraform with remote backend (true) or backend disabled (false)
+    required: false
+    default: "true"
   jwt_secret_key:
     description: JWT secret injected as TF_VAR_jwt_secret_key
     required: true
@@ -125,10 +129,16 @@ runs:
     - name: Terraform init
       shell: bash
       run: |
-        terraform -chdir="environments/${{ inputs.target_environment }}" init \
-          -backend-config=backend.hcl \
-          -backend-config="key=${{ inputs.target_environment }}/terraform.tfstate" \
-          -upgrade
+        if [ "${{ inputs.terraform_init_backend }}" = "true" ]; then
+          terraform -chdir="environments/${{ inputs.target_environment }}" init \
+            -backend-config=backend.hcl \
+            -backend-config="key=${{ inputs.target_environment }}/terraform.tfstate" \
+            -upgrade
+        else
+          terraform -chdir="environments/${{ inputs.target_environment }}" init \
+            -backend=false \
+            -upgrade
+        fi
 
     - name: Terraform validate
       shell: bash
