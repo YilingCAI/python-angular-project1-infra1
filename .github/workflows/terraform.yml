@@ -77,6 +77,7 @@ jobs:
       target_environment: dev
       github_environment: dev
       enable_security_checks: true
+      checkov_enforcement: advisory
       enable_pr_comment: true
       enable_infracost: true
     secrets: inherit
@@ -89,6 +90,7 @@ jobs:
       target_environment: staging
       github_environment: staging
       enable_security_checks: true
+      checkov_enforcement: advisory
       enable_pr_comment: false
       enable_infracost: true
     secrets: inherit
@@ -101,6 +103,7 @@ jobs:
       target_environment: prod
       github_environment: prod
       enable_security_checks: true
+      checkov_enforcement: advisory
       enable_pr_comment: false
       enable_infracost: true
     secrets: inherit

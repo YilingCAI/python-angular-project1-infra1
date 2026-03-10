@@ -17,6 +17,11 @@ on:
         required: false
         type: boolean
         default: true
+      checkov_enforcement:
+        description: Checkov enforcement mode (advisory or blocking)
+        required: false
+        type: string
+        default: advisory
       enable_pr_comment:
         description: Post plan comment to PR
         required: false
@@ -61,6 +66,7 @@ jobs:
           terraform_state_bucket: ${{ secrets.TERRAFORM_STATE_BUCKET }}
           jwt_secret_key: ${{ secrets.JWT_SECRET_KEY }}
           enable_security_checks: ${{ inputs.enable_security_checks }}
+          checkov_enforcement: ${{ inputs.checkov_enforcement }}
           aws_oidc_role_arn_plan: ${{ secrets.AWS_OIDC_ROLE_ARN_PLAN }}
           aws_oidc_role_arn: ${{ secrets.AWS_OIDC_ROLE_ARN }}
           aws_role_to_assume_plan: ${{ secrets.AWS_ROLE_TO_ASSUME_PLAN }}

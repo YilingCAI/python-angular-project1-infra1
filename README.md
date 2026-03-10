@@ -124,6 +124,8 @@ Plan checks include:
 - `trivy`
 - `terraform plan`
 
+Note: `terraform-common` supports `checkov_enforcement` with `advisory` (default, soft-fail) or `blocking`.
+
 ### After PR merge (`push` to `main`)
 
 Promotion applies run in order:

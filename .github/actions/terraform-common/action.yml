@@ -22,6 +22,10 @@ inputs:
     description: Run fmt/checkov/tflint/trivy checks
     required: false
     default: "false"
+  checkov_enforcement:
+    description: "Checkov enforcement mode: advisory (soft-fail) or blocking"
+    required: false
+    default: "advisory"
   aws_oidc_role_arn_plan:
     description: Plan/drift role ARN
     required: false
@@ -122,12 +126,22 @@ runs:
       if: ${{ inputs.enable_security_checks == 'true' }}
       shell: bash
       run: |
+        if [ "${{ inputs.checkov_enforcement }}" = "advisory" ]; then
+          CHECKOV_MODE="--soft-fail"
+        elif [ "${{ inputs.checkov_enforcement }}" = "blocking" ]; then
+          CHECKOV_MODE=""
+        else
+          echo "Invalid checkov_enforcement value '${{ inputs.checkov_enforcement }}'. Use 'advisory' or 'blocking'." >&2
+          exit 1
+        fi
+
         docker run --rm \
           -v "$PWD":/tf \
           bridgecrew/checkov:latest \
-          -d /tf \
+          -d /tf/environments/${{ inputs.target_environment }} \
           --framework terraform \
-          --quiet
+          --quiet \
+          ${CHECKOV_MODE}
 
     - name: Setup TFLint
       if: ${{ inputs.enable_security_checks == 'true' }}
