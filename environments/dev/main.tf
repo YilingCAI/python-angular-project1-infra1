@@ -31,6 +31,8 @@ terraform {
   }
 }
 
+data "aws_caller_identity" "current" {}
+
 locals {
   frontend_ecr_repository_url = var.frontend_ecr_repository_url != "" ? var.frontend_ecr_repository_url : replace(var.ecr_repository_url, "/backend", "/frontend")
   frontend_image_tag          = var.frontend_image_tag != "" ? var.frontend_image_tag : var.image_tag
@@ -38,7 +40,7 @@ locals {
 
 # Networking Module
 module "network" {
-  source = "./modules/network"
+  source = "../../modules/vpc"
 
   project_name          = var.project_name
   vpc_cidr              = var.vpc_cidr
@@ -52,7 +54,7 @@ module "network" {
 
 # RDS Module
 module "rds" {
-  source = "./modules/rds"
+  source = "../../modules/rds"
 
   project_name             = var.project_name
   database_subnet_ids      = module.network.database_subnet_ids
@@ -71,7 +73,7 @@ module "rds" {
 
 # ALB Module
 module "alb" {
-  source = "./modules/alb"
+  source = "../../modules/alb"
 
   project_name          = var.project_name
   vpc_id                = module.network.vpc_id
@@ -178,7 +180,7 @@ resource "aws_kms_key_policy" "secrets" {
 
 # ECS Module
 module "ecs" {
-  source = "./modules/ecs"
+  source = "../../modules/ecs-service"
 
   project_name              = var.project_name
   aws_region                = var.aws_region
@@ -208,7 +210,7 @@ module "ecs" {
 }
 
 module "ecs_frontend" {
-  source = "./modules/ecs_frontend"
+  source = "../../modules/iam"
 
   project_name          = var.project_name
   aws_region            = var.aws_region

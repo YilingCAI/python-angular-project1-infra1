@@ -9,7 +9,3 @@ provider "aws" {
     }
   }
 }
-
-# Data source for current AWS account ID (used in KMS key policies)
-data "aws_caller_identity" "current" {
-}

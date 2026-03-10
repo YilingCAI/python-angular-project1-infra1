@@ -1,0 +1,135 @@
+name: Terraform Infra
+
+on:
+  schedule:
+    - cron: '30 2 * * *'
+  pull_request:
+    branches: [main]
+    paths:
+      - '**/*.tf'
+      - '**/*.tfvars'
+      - '**/.terraform.lock.hcl'
+      - '!bootstrap/**'
+  push:
+    branches: [main]
+    paths:
+      - '**/*.tf'
+      - '**/*.tfvars'
+      - '**/.terraform.lock.hcl'
+      - '!bootstrap/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        required: true
+        type: choice
+        options: [dev, staging, prod]
+      action:
+        description: Terraform action
+        required: true
+        type: choice
+        options: [plan, apply]
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+concurrency:
+  group: terraform-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  drift-dev:
+    if: github.event_name == 'schedule'
+    uses: ./.github/workflows/terraform-reusable.yml
+    with:
+      target_environment: dev
+      github_environment: dev
+      operation: drift
+      fail_on_drift: true
+    secrets: inherit
+
+  drift-staging:
+    if: github.event_name == 'schedule'
+    uses: ./.github/workflows/terraform-reusable.yml
+    with:
+      target_environment: staging
+      github_environment: staging
+      operation: drift
+      fail_on_drift: true
+    secrets: inherit
+
+  drift-prod:
+    if: github.event_name == 'schedule'
+    uses: ./.github/workflows/terraform-reusable.yml
+    with:
+      target_environment: prod
+      github_environment: production
+      operation: drift
+      fail_on_drift: true
+    secrets: inherit
+
+  plan-dev:
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    uses: ./.github/workflows/terraform-plan-reusable.yml
+    with:
+      target_environment: dev
+      github_environment: dev
+      enable_security_checks: true
+      enable_pr_comment: true
+      enable_infracost: true
+    secrets: inherit
+
+  plan-staging:
+    needs: [plan-dev]
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    uses: ./.github/workflows/terraform-plan-reusable.yml
+    with:
+      target_environment: staging
+      github_environment: staging
+      enable_security_checks: true
+      enable_pr_comment: false
+      enable_infracost: true
+    secrets: inherit
+
+  plan-prod:
+    needs: [plan-staging]
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    uses: ./.github/workflows/terraform-plan-reusable.yml
+    with:
+      target_environment: prod
+      github_environment: production
+      enable_security_checks: true
+      enable_pr_comment: false
+      enable_infracost: true
+    secrets: inherit
+
+  apply-dev:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/terraform-reusable.yml
+    with:
+      target_environment: dev
+      github_environment: dev
+      operation: apply
+    secrets: inherit
+
+  apply-staging:
+    needs: [apply-dev]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/terraform-reusable.yml
+    with:
+      target_environment: staging
+      github_environment: staging
+      operation: apply
+    secrets: inherit
+
+  apply-prod:
+    needs: [apply-staging]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/terraform-reusable.yml
+    with:
+      target_environment: prod
+      github_environment: production
+      operation: apply
+    secrets: inherit

@@ -1,150 +1,157 @@
-<<<<<<< HEAD
-# python-devops-aws-project1-infra
-Terrafrom 
-=======
 # mypythonproject1-infra
 
 Terraform infrastructure repository for AWS networking, compute, database, and deployment prerequisites.
 
 ## Provisioned resources
 
-- VPC + public/private/db subnets
+- VPC with public/private/db subnets
 - ALB and listeners
-- ECS cluster/services for backend and frontend
+- ECS cluster and services for backend/frontend
 - RDS PostgreSQL
-- IAM roles/policies needed by workloads
+- IAM/OIDC resources for GitHub Actions deployment
+- S3 + DynamoDB Terraform state/locking resources
 
 ## Repository layout
 
 ```text
 .
-├── main.tf
-├── variables.tf
-├── outputs.tf
-├── providers.tf
-├── backend-config.hcl
-├── envs/
-│   ├── dev.tfvars
-│   ├── staging.tfvars
-│   └── prod.tfvars
-├── modules/
-│   ├── network/
-│   ├── alb/
-│   ├── ecs/
-│   ├── ecs_frontend/
-│   └── rds/
 ├── bootstrap/
-└── .github/workflows/terraform-infra.yml
+│   ├── env/
+│   │   └── bootstrap.tfvars
+│   ├── main.tf
+│   ├── variables.tf
+│   ├── outputs.tf
+│   └── provider.tf
+├── environments/
+│   ├── dev/
+│   ├── staging/
+│   └── prod/
+├── modules/
+│   ├── vpc/
+│   ├── ecs-cluster/
+│   ├── ecs-service/
+│   ├── alb/
+│   ├── rds/
+│   └── iam/
+├── .github/workflows/
+│   ├── terraform.yml
+│   ├── terraform-plan-reusable.yml
+│   └── terraform-reusable.yml
+└── Makefile
 ```
 
-## Backend state model
+## State and locking model
 
-Terraform uses S3 remote state with DynamoDB state locking.
+Each environment uses isolated remote state and lock table:
 
-`backend-config.hcl`:
+- `dev`: `mypythonproject1-tfstate-dev` + `mypythonproject1-terraform-lock-dev`
+- `staging`: `mypythonproject1-tfstate-staging` + `mypythonproject1-terraform-lock-staging`
+- `prod`: `mypythonproject1-tfstate-prod` + `mypythonproject1-terraform-lock-prod`
+
+`backend.hcl` files are rendered during CI and for local use contain:
 
 ```hcl
-bucket       = "myproject-terraform-state"
-key          = "terraform.tfstate"
-region       = "us-east-1"
-encrypt      = true
-dynamodb_table = "terraform-lock"
+bucket         = "<env-state-bucket>"
+key            = "<env>/terraform.tfstate"
+region         = "us-east-1"
+dynamodb_table = "mypythonproject1-terraform-lock-<env>"
+encrypt        = true
 ```
 
-Manual init example:
+## Bootstrap (per AWS account)
+
+Bootstrap creates shared foundation resources (state buckets, lock tables, OIDC role/provider, ECR repos).
+
+Run from repo root:
 
 ```bash
-terraform init \
-  -backend-config="bucket=myproject-terraform-state" \
-  -backend-config="key=staging/terraform.tfstate" \
-  -backend-config="region=us-east-1" \
-  -backend-config="dynamodb_table=terraform-lock"
+make bootstrap-init
+make bootstrap-plan
+make bootstrap-apply
 ```
 
-Use separate state keys per environment, for example:
+Bootstrap variables are in `bootstrap/env/bootstrap.tfvars`.
 
-- `dev/terraform.tfstate`
-- `staging/terraform.tfstate`
-- `prod/terraform.tfstate`
+## CI/CD flow
 
-## First-time bootstrap (per AWS account)
+Main workflow: `.github/workflows/terraform.yml`
 
-1. Create S3 bucket for Terraform state (versioned + encrypted)
-2. Create GitHub OIDC provider in IAM
-3. Create IAM roles trusted for GitHub Environments (`staging`, `production`)
-4. Create ECR repositories for backend/frontend
+### PR opened to `main`
 
-Bootstrap stack:
+Promotion-style validation plans run in order:
 
-```bash
-terraform -chdir=bootstrap init -upgrade
-terraform -chdir=bootstrap apply
-```
+1. `plan-dev`
+2. `plan-staging`
+3. `plan-prod`
 
-This runs the dedicated stack in `bootstrap/`.
+Plan checks include:
 
-## Local usage
+- `terraform fmt -check`
+- `terraform validate`
+- `tflint`
+- `tfsec`
+- `terraform plan`
+
+### After PR merge (`push` to `main`)
+
+Promotion applies run in order:
+
+1. `apply-dev`
+2. `apply-staging` (after `apply-dev`)
+3. `apply-prod` (after `apply-staging`)
+
+Approval gates are controlled by GitHub Environments:
+
+- `staging` environment approval gates `apply-staging`
+- `production` environment approval gates `apply-prod`
+
+### Nightly drift detection
+
+Scheduled jobs run drift plans for all environments:
+
+- `drift-dev`
+- `drift-staging`
+- `drift-prod`
+
+With `fail_on_drift: true`, a drift result fails that environment job and uploads artifacts for investigation.
+
+## Required GitHub configuration
+
+Repository variables:
+
+- `AWS_REGION`
+
+Repository/environment secrets:
+
+- `AWS_OIDC_ROLE_ARN`
+- `AWS_OIDC_ROLE_ARN_PLAN` (optional, dedicated plan role)
+- `AWS_ROLE_TO_ASSUME` (legacy fallback)
+- `AWS_ROLE_TO_ASSUME_PLAN` (legacy fallback)
+- `TERRAFORM_STATE_BUCKET`
+- `JWT_SECRET_KEY`
+- `INFRACOST_API_KEY` (optional)
+- `SLACK_WEBHOOK_URL` (optional)
+- `TEAMS_WEBHOOK_URL` (optional)
+
+Create GitHub Environments:
+
+- `dev`
+- `staging`
+- `production`
+
+Configure required reviewers on `staging` and `production` for controlled promotion.
+
+## Local validation
 
 ```bash
 terraform fmt -check -recursive
-terraform init -backend=false
-terraform validate
-terraform plan -var-file="envs/staging.tfvars"
+terraform -chdir=environments/dev validate
+terraform -chdir=environments/staging validate
+terraform -chdir=environments/prod validate
 ```
-
-Or use Make targets from this repo root:
-
-```bash
-make tf-validate
-make tf-plan ENV=staging TERRAFORM_STATE_BUCKET=<state-bucket>
-make tf-apply ENV=staging TERRAFORM_STATE_BUCKET=<state-bucket>
-make tf-destroy ENV=staging TERRAFORM_STATE_BUCKET=<state-bucket>
-make workflow-check
-```
-
-Destroy:
-
-```bash
-terraform destroy -var-file="envs/staging.tfvars"
-```
-
-## GitHub Actions (infra-only)
-
-Workflow: `.github/workflows/terraform-infra.yml`
-
-- `pull_request` to `main`: `fmt`, `init`, `validate`, `plan`
-- `push` to `main`: `apply` (gated by `production` environment approval)
-- `workflow_dispatch`: choose `environment` (`staging` or `prod`) and `action` (`plan` or `apply`)
-- `schedule` (nightly): drift-detection `plan` for `staging` and `prod`
-- `apply` uses GitHub Environment protection
-
-Required repository configuration:
-
-- Secrets:
-  - `AWS_ROLE_TO_ASSUME`
-  - `AWS_ROLE_TO_ASSUME_PLAN` (optional, read-only role for PR plans)
-  - `TERRAFORM_STATE_BUCKET`
-  - `TERRAFORM_LOCK_TABLE`
-  - `JWT_SECRET_KEY`
-- Variables:
-  - `AWS_REGION`
 
 ## Dependabot
 
-Dependabot configuration is in `.github/dependabot.yml` and updates:
+Dependabot config: `.github/dependabot.yml`.
 
-- Terraform providers/modules (including `.terraform.lock.hcl`)
-- GitHub Actions versions
-
-Recommended rollout pattern (dev-first, prod-late): merge dependency updates after validation in lower-risk environment first, then promote the same commit to production.
-
-## Environment files
-
-- `envs/staging.tfvars`: staging sizing/capacity
-- `envs/prod.tfvars`: production sizing/capacity
-- `envs/dev.tfvars`: developer/shared lower-cost setup
-
-Note for `dev`: ECS desired counts are intentionally set to `0` so first-time `terraform apply` succeeds even before ECR images are pushed. After pushing images, scale up by setting `desired_count` / `frontend_desired_count` (and `min_capacity`) above `0`.
-
-Keep shared structure in modules and only vary environment inputs in tfvars.
->>>>>>> c093ea3 (initial commit)
+Dependabot opens update PRs, then the same PR validation and promotion controls apply.
