@@ -22,18 +22,18 @@ multi_az                 = false
 log_retention_days       = 3
 
 # ECS
-ecr_repository_url        = "248547463735.dkr.ecr.us-east-1.amazonaws.com/mypythonproject1/backend"
+ecr_repository_url          = "248547463735.dkr.ecr.us-east-1.amazonaws.com/mypythonproject1/backend"
 frontend_ecr_repository_url = "248547463735.dkr.ecr.us-east-1.amazonaws.com/mypythonproject1/frontend"
-image_tag                 = "dev"
-frontend_image_tag        = "dev"
-task_cpu                  = "256"
-task_memory               = "512"
-desired_count             = 1
-frontend_desired_count    = 1
-min_capacity              = 1
-max_capacity              = 3
-target_cpu_utilization    = 70
-target_memory_utilization = 80
+image_tag                   = "dev"
+frontend_image_tag          = "dev"
+task_cpu                    = "256"
+task_memory                 = "512"
+desired_count               = 1
+frontend_desired_count      = 1
+min_capacity                = 1
+max_capacity                = 3
+target_cpu_utilization      = 70
+target_memory_utilization   = 80
 
 # ALB & Security
 health_check_path = "/health"
