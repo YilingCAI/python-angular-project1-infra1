@@ -14,7 +14,8 @@ inputs:
     required: true
   terraform_state_bucket:
     description: Terraform state bucket name
-    required: true
+    required: false
+    default: ""
   terraform_init_backend:
     description: Initialize Terraform with remote backend (true) or backend disabled (false)
     required: false
@@ -112,8 +113,14 @@ runs:
       run: echo "TF_VAR_jwt_secret_key=${{ inputs.jwt_secret_key }}" >> "$GITHUB_ENV"
 
     - name: Render backend config
+      if: ${{ inputs.terraform_init_backend == 'true' }}
       shell: bash
       run: |
+        if [ -z "${{ inputs.terraform_state_bucket }}" ]; then
+          echo "TERRAFORM_STATE_BUCKET is required when terraform_init_backend=true." >&2
+          exit 1
+        fi
+
         cat > environments/${{ inputs.target_environment }}/backend.hcl <<EOF
         bucket         = "${{ inputs.terraform_state_bucket }}"
         region         = "${{ inputs.aws_region }}"

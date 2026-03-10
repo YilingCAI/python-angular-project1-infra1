@@ -41,7 +41,7 @@ on:
       JWT_SECRET_KEY:
         required: true
       TERRAFORM_STATE_BUCKET:
-        required: true
+        required: false
       INFRACOST_API_KEY:
         required: false
 
