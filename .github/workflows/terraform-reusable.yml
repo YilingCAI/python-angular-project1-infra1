@@ -79,10 +79,7 @@ jobs:
           jwt_secret_key: ${{ secrets.JWT_SECRET_KEY }}
           enable_security_checks: ${{ inputs.enable_security_checks }}
           checkov_enforcement: ${{ inputs.checkov_enforcement }}
-          aws_oidc_role_arn_plan: ${{ secrets.AWS_OIDC_ROLE_ARN_PLAN }}
           aws_oidc_role_arn: ${{ secrets.AWS_OIDC_ROLE_ARN }}
-          aws_role_to_assume_plan: ${{ secrets.AWS_ROLE_TO_ASSUME_PLAN }}
-          aws_role_to_assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           role_session_name_prefix: gha-terraform
 
       - name: Terraform shared plan steps

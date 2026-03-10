@@ -164,9 +164,6 @@ Repository variables:
 Repository/environment secrets:
 
 - `AWS_OIDC_ROLE_ARN`
-- `AWS_OIDC_ROLE_ARN_PLAN` (optional, dedicated plan role)
-- `AWS_ROLE_TO_ASSUME` (legacy fallback)
-- `AWS_ROLE_TO_ASSUME_PLAN` (legacy fallback)
 - `TERRAFORM_STATE_BUCKET`
 - `JWT_SECRET_KEY`
 - `INFRACOST_API_KEY` (optional)

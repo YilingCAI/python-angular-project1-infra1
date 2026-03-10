@@ -26,20 +26,8 @@ inputs:
     description: "Checkov enforcement mode: advisory (soft-fail) or blocking"
     required: false
     default: "advisory"
-  aws_oidc_role_arn_plan:
-    description: Plan/drift role ARN
-    required: false
-    default: ""
   aws_oidc_role_arn:
-    description: Apply/default role ARN
-    required: false
-    default: ""
-  aws_role_to_assume_plan:
-    description: Legacy plan/drift role ARN fallback
-    required: false
-    default: ""
-  aws_role_to_assume:
-    description: Legacy apply/default role ARN fallback
+    description: OIDC role ARN used for all operations
     required: false
     default: ""
   role_session_name_prefix:
@@ -77,19 +65,12 @@ runs:
       shell: bash
       env:
         OPERATION: ${{ inputs.operation }}
-        AWS_OIDC_ROLE_ARN_PLAN: ${{ inputs.aws_oidc_role_arn_plan }}
         AWS_OIDC_ROLE_ARN: ${{ inputs.aws_oidc_role_arn }}
-        AWS_ROLE_TO_ASSUME_PLAN: ${{ inputs.aws_role_to_assume_plan }}
-        AWS_ROLE_TO_ASSUME: ${{ inputs.aws_role_to_assume }}
       run: |
-        if [ "$OPERATION" = "apply" ]; then
-          ROLE_ARN="${AWS_OIDC_ROLE_ARN:-${AWS_ROLE_TO_ASSUME:-}}"
-        else
-          ROLE_ARN="${AWS_OIDC_ROLE_ARN_PLAN:-${AWS_OIDC_ROLE_ARN:-${AWS_ROLE_TO_ASSUME_PLAN:-${AWS_ROLE_TO_ASSUME:-}}}}"
-        fi
+        ROLE_ARN="${AWS_OIDC_ROLE_ARN:-}"
 
         if [ -z "$ROLE_ARN" ]; then
-          echo "Missing AWS role secret for operation '$OPERATION'." >&2
+          echo "Missing AWS_OIDC_ROLE_ARN secret for operation '$OPERATION'." >&2
           exit 1
         fi
 
