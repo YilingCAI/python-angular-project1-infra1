@@ -47,6 +47,14 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Validate backend/auth combination
+      shell: bash
+      run: |
+        if [ "${{ inputs.terraform_init_backend }}" = "true" ] && [ "${{ inputs.aws_auth_required }}" != "true" ]; then
+          echo "Invalid configuration: terraform_init_backend=true requires aws_auth_required=true." >&2
+          exit 1
+        fi
+
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v3
       with:
