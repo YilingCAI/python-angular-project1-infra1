@@ -1,17 +1,12 @@
-name: Terraform Plan Reusable
+name: Terraform Plan Speculative Reusable
 
 on:
   workflow_call:
     inputs:
       target_environment:
-        description: Terraform target environment for plan checks
+        description: Terraform target environment for speculative plan checks
         required: true
         type: string
-      github_environment:
-        description: Optional GitHub Environment name override
-        required: false
-        type: string
-        default: ""
       enable_security_checks:
         description: Run checkov/tflint/trivy checks
         required: false
@@ -22,11 +17,6 @@ on:
         required: false
         type: string
         default: advisory
-      terraform_init_backend:
-        description: Initialize Terraform with backend enabled (true) or disabled (false)
-        required: false
-        type: boolean
-        default: true
       enable_pr_comment:
         description: Post plan comment to PR
         required: false
@@ -47,17 +37,15 @@ on:
 
 permissions:
   contents: read
-  id-token: write
   pull-requests: write
 
 jobs:
-  terraform-plan-real:
-    name: Terraform Plan ${{ inputs.target_environment }}
+  terraform-plan-speculative:
+    name: Terraform Plan ${{ inputs.target_environment }} (speculative)
     runs-on: ubuntu-latest
     concurrency:
       group: terraform-state-${{ inputs.target_environment }}
       cancel-in-progress: false
-    environment: ${{ inputs.github_environment != '' && inputs.github_environment || inputs.target_environment }}
     env:
       TF_ENV: ${{ inputs.target_environment }}
       INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
@@ -72,8 +60,8 @@ jobs:
           operation: plan
           aws_region: ${{ vars.AWS_REGION }}
           terraform_state_bucket: ${{ secrets.TERRAFORM_STATE_BUCKET }}
-          terraform_init_backend: ${{ inputs.terraform_init_backend }}
-          aws_auth_required: true
+          terraform_init_backend: false
+          aws_auth_required: false
           jwt_secret_key: ${{ secrets.JWT_SECRET_KEY }}
           enable_security_checks: ${{ inputs.enable_security_checks }}
           checkov_enforcement: ${{ inputs.checkov_enforcement }}
@@ -84,7 +72,7 @@ jobs:
         uses: ./.github/actions/terraform-plan-common
         with:
           target_environment: ${{ inputs.target_environment }}
-          speculative_plan: false
+          speculative_plan: true
           enable_infracost: ${{ inputs.enable_infracost }}
           infracost_api_key: ${{ secrets.INFRACOST_API_KEY }}
           enable_pr_comment: ${{ inputs.enable_pr_comment }}
@@ -95,5 +83,7 @@ jobs:
         run: |
           echo "## Terraform Workflow Summary" >> "$GITHUB_STEP_SUMMARY"
           echo "- Environment: ${TF_ENV}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Operation: plan" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Operation: plan (speculative)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Init mode: backend=false" >> "$GITHUB_STEP_SUMMARY"
+          echo "- AWS auth: disabled" >> "$GITHUB_STEP_SUMMARY"
           echo "- Status: ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"

@@ -40,21 +40,24 @@ runs:
           echo "terraform.tfvars not found in ${ENV_DIR}; running with defaults and other provided vars."
         fi
 
-    - name: Terraform plan
+    - name: Terraform plan (speculative)
+      if: ${{ inputs.speculative_plan == 'true' }}
       shell: bash
       run: |
-        if [ "${{ inputs.speculative_plan }}" = "true" ]; then
-          terraform -chdir="environments/${{ inputs.target_environment }}" plan \
-            ${{ steps.vars.outputs.var_file_arg }} \
-            -lock=false \
-            -no-color 2>&1 | tee "environments/${{ inputs.target_environment }}/plan-output.txt"
-        else
-          terraform -chdir="environments/${{ inputs.target_environment }}" plan \
-            ${{ steps.vars.outputs.var_file_arg }} \
-            -lock-timeout=5m \
-            -out="tfplan.binary" \
-            -no-color 2>&1 | tee "environments/${{ inputs.target_environment }}/plan-output.txt"
-        fi
+        terraform -chdir="environments/${{ inputs.target_environment }}" plan \
+          ${{ steps.vars.outputs.var_file_arg }} \
+          -lock=false \
+          -no-color 2>&1 | tee "environments/${{ inputs.target_environment }}/plan-output.txt"
+
+    - name: Terraform plan (real)
+      if: ${{ inputs.speculative_plan != 'true' }}
+      shell: bash
+      run: |
+        terraform -chdir="environments/${{ inputs.target_environment }}" plan \
+          ${{ steps.vars.outputs.var_file_arg }} \
+          -lock-timeout=5m \
+          -out="tfplan.binary" \
+          -no-color 2>&1 | tee "environments/${{ inputs.target_environment }}/plan-output.txt"
 
     - name: Setup Infracost
       if: ${{ inputs.speculative_plan == 'true' && inputs.enable_infracost == 'true' && inputs.infracost_api_key != '' }}
