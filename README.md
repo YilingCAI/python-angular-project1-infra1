@@ -126,6 +126,8 @@ Plan checks include:
 
 Note: `terraform-common` supports `checkov_enforcement` with `advisory` (default, soft-fail) or `blocking`.
 
+Terraform var-file handling is automatic per environment: if `environments/<env>/terraform.tfvars` exists it is used; otherwise plan/drift/apply run without `-var-file`.
+
 ### After PR merge (`push` to `main`)
 
 Promotion applies run in order:

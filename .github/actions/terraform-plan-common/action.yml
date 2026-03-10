@@ -22,11 +22,25 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Detect Terraform var-file
+      id: vars
+      shell: bash
+      run: |
+        ENV_DIR="environments/${{ inputs.target_environment }}"
+        if [ -f "${ENV_DIR}/terraform.tfvars" ]; then
+          echo "var_file_arg=-var-file=terraform.tfvars" >> "$GITHUB_OUTPUT"
+          echo "infracost_plan_flags=--terraform-plan-flags=-var-file=terraform.tfvars" >> "$GITHUB_OUTPUT"
+        else
+          echo "var_file_arg=" >> "$GITHUB_OUTPUT"
+          echo "infracost_plan_flags=" >> "$GITHUB_OUTPUT"
+          echo "terraform.tfvars not found in ${ENV_DIR}; running with defaults and other provided vars."
+        fi
+
     - name: Terraform plan
       shell: bash
       run: |
         terraform -chdir="environments/${{ inputs.target_environment }}" plan \
-          -var-file="terraform.tfvars" \
+          ${{ steps.vars.outputs.var_file_arg }} \
           -out="tfplan.binary" \
           -no-color 2>&1 | tee "environments/${{ inputs.target_environment }}/plan-output.txt"
 
@@ -42,7 +56,7 @@ runs:
       run: |
         infracost breakdown \
           --path="environments/${{ inputs.target_environment }}" \
-          --terraform-plan-flags="-var-file=terraform.tfvars" \
+          ${{ steps.vars.outputs.infracost_plan_flags }} \
           --format=json \
           --out-file="environments/${{ inputs.target_environment }}/infracost.json"
 

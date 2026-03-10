@@ -91,13 +91,25 @@ jobs:
           infracost_api_key: ${{ secrets.INFRACOST_API_KEY }}
           enable_pr_comment: ${{ inputs.enable_pr_comment }}
 
+      - name: Detect Terraform var-file
+        if: inputs.operation == 'drift' || inputs.operation == 'apply'
+        id: vars
+        shell: bash
+        run: |
+          if [ -f "environments/${TF_ENV}/terraform.tfvars" ]; then
+            echo "var_file_arg=-var-file=terraform.tfvars" >> "$GITHUB_OUTPUT"
+          else
+            echo "var_file_arg=" >> "$GITHUB_OUTPUT"
+            echo "terraform.tfvars not found in environments/${TF_ENV}; running with defaults and other provided vars."
+          fi
+
       - name: Terraform drift plan
         if: inputs.operation == 'drift'
         id: drift
         shell: bash
         run: |
           set +e
-          terraform -chdir="environments/${TF_ENV}" plan -detailed-exitcode -var-file="terraform.tfvars" -no-color > "environments/${TF_ENV}/plan-output.txt" 2>&1
+          terraform -chdir="environments/${TF_ENV}" plan -detailed-exitcode ${{ steps.vars.outputs.var_file_arg }} -no-color > "environments/${TF_ENV}/plan-output.txt" 2>&1
           PLAN_EXIT=$?
           set -e
 
@@ -142,7 +154,7 @@ jobs:
         if: inputs.operation == 'apply'
         run: |
           terraform -chdir="environments/${TF_ENV}" apply \
-            -var-file="terraform.tfvars" \
+            ${{ steps.vars.outputs.var_file_arg }} \
             -auto-approve \
             -input=false
 
