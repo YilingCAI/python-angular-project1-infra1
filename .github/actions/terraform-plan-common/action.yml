@@ -44,6 +44,12 @@ runs:
       shell: bash
       run: |
         if [ "${{ inputs.speculative_plan }}" = "true" ]; then
+          # Reconfigure in-place to avoid any stale backend metadata from prior runs/caches.
+          terraform -chdir="environments/${{ inputs.target_environment }}" init \
+            -backend=false \
+            -reconfigure \
+            -upgrade
+
           terraform -chdir="environments/${{ inputs.target_environment }}" plan \
             ${{ steps.vars.outputs.var_file_arg }} \
             -lock=false \

@@ -176,10 +176,12 @@ runs:
           terraform -chdir="environments/${{ inputs.target_environment }}" init \
             -backend-config=backend.hcl \
             -backend-config="key=${{ inputs.target_environment }}/terraform.tfstate" \
+            -reconfigure \
             -upgrade
         else
           terraform -chdir="environments/${{ inputs.target_environment }}" init \
             -backend=false \
+            -reconfigure \
             -upgrade
         fi
 
