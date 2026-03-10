@@ -41,6 +41,16 @@ on:
         required: false
         type: boolean
         default: true
+      apply_use_saved_plan:
+        description: Apply using previously generated saved plan artifact
+        required: false
+        type: boolean
+        default: false
+      saved_plan_artifact_name:
+        description: Artifact name containing tfplan.binary
+        required: false
+        type: string
+        default: ""
     secrets:
       JWT_SECRET_KEY:
         required: true
@@ -101,6 +111,22 @@ jobs:
           else
             echo "var_file_arg=" >> "$GITHUB_OUTPUT"
             echo "terraform.tfvars not found in environments/${TF_ENV}; running with defaults and other provided vars."
+
+      - name: Download saved plan artifact
+        if: inputs.operation == 'apply' && inputs.apply_use_saved_plan && inputs.saved_plan_artifact_name != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.saved_plan_artifact_name }}
+          path: environments/${{ inputs.target_environment }}
+
+      - name: Verify saved plan file
+        if: inputs.operation == 'apply' && inputs.apply_use_saved_plan
+        shell: bash
+        run: |
+          [ -f "environments/${TF_ENV}/tfplan.binary" ] || {
+            echo "Saved plan file not found at environments/${TF_ENV}/tfplan.binary" >&2
+            exit 1
+          }
           fi
 
       - name: Terraform drift plan
@@ -153,11 +179,19 @@ jobs:
       - name: Terraform apply
         if: inputs.operation == 'apply'
         run: |
-          terraform -chdir="environments/${TF_ENV}" apply \
-            ${{ steps.vars.outputs.var_file_arg }} \
-            -lock-timeout=5m \
-            -auto-approve \
-            -input=false
+          if [ "${{ inputs.apply_use_saved_plan }}" = "true" ]; then
+            terraform -chdir="environments/${TF_ENV}" apply \
+              -lock-timeout=5m \
+              -auto-approve \
+              -input=false \
+              "tfplan.binary"
+          else
+            terraform -chdir="environments/${TF_ENV}" apply \
+              ${{ steps.vars.outputs.var_file_arg }} \
+              -lock-timeout=5m \
+              -auto-approve \
+              -input=false
+          fi
 
       - name: Workflow summary
         if: always()

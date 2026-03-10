@@ -22,6 +22,11 @@ on:
         required: false
         type: string
         default: advisory
+      speculative_plan:
+        description: Run speculative plan mode (no saved plan, no lock)
+        required: false
+        type: boolean
+        default: false
       enable_pr_comment:
         description: Post plan comment to PR
         required: false
@@ -77,6 +82,7 @@ jobs:
         uses: ./.github/actions/terraform-plan-common
         with:
           target_environment: ${{ inputs.target_environment }}
+          speculative_plan: ${{ inputs.speculative_plan }}
           enable_infracost: ${{ inputs.enable_infracost }}
           infracost_api_key: ${{ secrets.INFRACOST_API_KEY }}
           enable_pr_comment: ${{ inputs.enable_pr_comment }}

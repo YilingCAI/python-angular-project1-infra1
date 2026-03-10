@@ -103,7 +103,7 @@ Main workflow: `.github/workflows/terraform.yml`
 Shared workflow logic is implemented with composite actions:
 
 - `.github/actions/terraform-common/action.yml`: Terraform setup, AWS OIDC auth, backend render, init/validate, optional security checks.
-- `.github/actions/terraform-plan-common/action.yml`: Terraform plan, optional Infracost, plan artifact upload, optional PR comment.
+- `.github/actions/terraform-plan-common/action.yml`: Terraform plan (speculative or real), optional Infracost, plan artifact upload, optional PR comment.
 
 `terraform-common` restores cache for Terraform providers/modules (`~/.terraform.d/plugin-cache`, `environments/<env>/.terraform`) and TFLint plugins (`~/.tflint.d/plugins`) to speed repeated workflow runs.
 
@@ -111,11 +111,13 @@ CI Terraform version is pinned to `1.10.5` in the shared action because `use_loc
 
 ### PR opened to `main`
 
-Promotion-style validation plans run in order:
+Speculative validation plans run in order:
 
 1. `plan-dev`
 2. `plan-staging`
 3. `plan-prod`
+
+These run with `speculative_plan: true` (no saved plan artifact for apply handoff and no state lock).
 
 Plan checks include:
 
@@ -134,11 +136,19 @@ To reduce transient lock contention with `use_lockfile`, plan/drift/apply use `-
 
 ### After PR merge (`push` to `main`)
 
-Promotion applies run in order:
+Real promotion plans run in order:
+
+1. `plan-dev-main`
+2. `plan-staging-main` (after `plan-dev-main`)
+3. `plan-prod-main` (after `plan-staging-main`)
+
+Then promotion applies run in order:
 
 1. `apply-dev`
 2. `apply-staging` (after `apply-dev`)
 3. `apply-prod` (after `apply-staging`)
+
+Apply jobs reuse the saved real-plan artifacts (`terraform plan -out=tfplan.binary`) and execute `terraform apply tfplan.binary` for each environment.
 
 Approval gates are controlled by GitHub Environments:
 

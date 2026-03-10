@@ -6,6 +6,10 @@ inputs:
   target_environment:
     description: Terraform target environment (dev/staging/prod)
     required: true
+  speculative_plan:
+    description: Run speculative plan mode (no saved plan, no state lock)
+    required: false
+    default: "false"
   enable_infracost:
     description: Run Infracost when API key exists
     required: false
@@ -39,20 +43,27 @@ runs:
     - name: Terraform plan
       shell: bash
       run: |
-        terraform -chdir="environments/${{ inputs.target_environment }}" plan \
-          ${{ steps.vars.outputs.var_file_arg }} \
-          -lock-timeout=5m \
-          -out="tfplan.binary" \
-          -no-color 2>&1 | tee "environments/${{ inputs.target_environment }}/plan-output.txt"
+        if [ "${{ inputs.speculative_plan }}" = "true" ]; then
+          terraform -chdir="environments/${{ inputs.target_environment }}" plan \
+            ${{ steps.vars.outputs.var_file_arg }} \
+            -lock=false \
+            -no-color 2>&1 | tee "environments/${{ inputs.target_environment }}/plan-output.txt"
+        else
+          terraform -chdir="environments/${{ inputs.target_environment }}" plan \
+            ${{ steps.vars.outputs.var_file_arg }} \
+            -lock-timeout=5m \
+            -out="tfplan.binary" \
+            -no-color 2>&1 | tee "environments/${{ inputs.target_environment }}/plan-output.txt"
+        fi
 
     - name: Setup Infracost
-      if: ${{ inputs.enable_infracost == 'true' && inputs.infracost_api_key != '' }}
+      if: ${{ inputs.speculative_plan == 'true' && inputs.enable_infracost == 'true' && inputs.infracost_api_key != '' }}
       uses: infracost/actions/setup@v3
       with:
         api-key: ${{ inputs.infracost_api_key }}
 
     - name: Infracost breakdown
-      if: ${{ inputs.enable_infracost == 'true' && inputs.infracost_api_key != '' }}
+      if: ${{ inputs.speculative_plan == 'true' && inputs.enable_infracost == 'true' && inputs.infracost_api_key != '' }}
       shell: bash
       run: |
         infracost breakdown \
@@ -65,6 +76,7 @@ runs:
       uses: actions/upload-artifact@v4
       with:
         name: terraform-plan-${{ inputs.target_environment }}
+        if-no-files-found: ignore
         path: |
           environments/${{ inputs.target_environment }}/plan-output.txt
           environments/${{ inputs.target_environment }}/tfplan.binary
