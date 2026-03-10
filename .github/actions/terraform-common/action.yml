@@ -107,6 +107,20 @@ runs:
         aws-region: ${{ inputs.aws_region }}
         role-session-name: ${{ inputs.role_session_name_prefix }}-${{ inputs.target_environment }}-${{ github.run_id }}
         audience: sts.amazonaws.com
+        unset-current-credentials: true
+
+    - name: Verify assumed role identity
+      shell: bash
+      env:
+        EXPECTED_ROLE_ARN: ${{ steps.role.outputs.role_arn }}
+      run: |
+        ACTUAL_ARN=$(aws sts get-caller-identity --query Arn --output text)
+        EXPECTED_ROLE_NAME="${EXPECTED_ROLE_ARN##*/}"
+
+        if ! printf '%s' "$ACTUAL_ARN" | grep -Eq ":assumed-role/${EXPECTED_ROLE_NAME}/"; then
+          echo "OIDC role assumption mismatch. Expected assumed role '${EXPECTED_ROLE_NAME}' from '${EXPECTED_ROLE_ARN}', got '${ACTUAL_ARN}'." >&2
+          exit 1
+        fi
 
     - name: Export sensitive Terraform vars
       shell: bash
