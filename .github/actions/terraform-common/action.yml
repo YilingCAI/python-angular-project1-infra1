@@ -20,6 +20,10 @@ inputs:
     description: Initialize Terraform with remote backend (true) or backend disabled (false)
     required: false
     default: "true"
+  aws_auth_required:
+    description: Whether AWS OIDC authentication is required for this run
+    required: false
+    default: "true"
   jwt_secret_key:
     description: JWT secret injected as TF_VAR_jwt_secret_key
     required: true
@@ -66,6 +70,7 @@ runs:
           ${{ runner.os }}-terraform-
 
     - name: Resolve AWS role ARN
+      if: ${{ inputs.aws_auth_required == 'true' }}
       id: role
       shell: bash
       env:
@@ -87,6 +92,7 @@ runs:
         echo "role_arn=$ROLE_ARN" >> "$GITHUB_OUTPUT"
 
     - name: Configure AWS credentials
+      if: ${{ inputs.aws_auth_required == 'true' }}
       uses: aws-actions/configure-aws-credentials@v4
       with:
         role-to-assume: ${{ steps.role.outputs.role_arn }}
@@ -96,6 +102,7 @@ runs:
         unset-current-credentials: true
 
     - name: Verify assumed role identity
+      if: ${{ inputs.aws_auth_required == 'true' }}
       shell: bash
       env:
         EXPECTED_ROLE_ARN: ${{ steps.role.outputs.role_arn }}
