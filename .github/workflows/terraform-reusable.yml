@@ -109,7 +109,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          terraform -chdir="environments/${TF_ENV}" plan -detailed-exitcode ${{ steps.vars.outputs.var_file_arg }} -no-color > "environments/${TF_ENV}/plan-output.txt" 2>&1
+          terraform -chdir="environments/${TF_ENV}" plan -detailed-exitcode ${{ steps.vars.outputs.var_file_arg }} -lock-timeout=5m -no-color > "environments/${TF_ENV}/plan-output.txt" 2>&1
           PLAN_EXIT=$?
           set -e
 
@@ -155,6 +155,7 @@ jobs:
         run: |
           terraform -chdir="environments/${TF_ENV}" apply \
             ${{ steps.vars.outputs.var_file_arg }} \
+            -lock-timeout=5m \
             -auto-approve \
             -input=false
 

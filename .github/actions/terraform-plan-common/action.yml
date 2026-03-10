@@ -41,6 +41,7 @@ runs:
       run: |
         terraform -chdir="environments/${{ inputs.target_environment }}" plan \
           ${{ steps.vars.outputs.var_file_arg }} \
+          -lock-timeout=5m \
           -out="tfplan.binary" \
           -no-color 2>&1 | tee "environments/${{ inputs.target_environment }}/plan-output.txt"
 

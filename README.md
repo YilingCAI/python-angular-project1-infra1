@@ -130,6 +130,8 @@ Note: `terraform-common` supports `checkov_enforcement` with `advisory` (default
 
 Terraform var-file handling is automatic per environment: if `environments/<env>/terraform.tfvars` exists it is used; otherwise plan/drift/apply run without `-var-file`.
 
+To reduce transient lock contention with `use_lockfile`, plan/drift/apply use `-lock-timeout=5m` in CI.
+
 ### After PR merge (`push` to `main`)
 
 Promotion applies run in order:
