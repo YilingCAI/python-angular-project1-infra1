@@ -22,8 +22,8 @@ multi_az                 = false
 log_retention_days       = 3
 
 # ECS
-ecr_repository_url        = "769254791061.dkr.ecr.us-east-1.amazonaws.com/mypythonproject1/backend"
-frontend_ecr_repository_url = "769254791061.dkr.ecr.us-east-1.amazonaws.com/mypythonproject1/frontend"
+ecr_repository_url        = "248547463735.dkr.ecr.us-east-1.amazonaws.com/mypythonproject1/backend"
+frontend_ecr_repository_url = "248547463735.dkr.ecr.us-east-1.amazonaws.com/mypythonproject1/frontend"
 image_tag                 = "dev"
 frontend_image_tag        = "dev"
 task_cpu                  = "256"
@@ -38,9 +38,6 @@ target_memory_utilization = 80
 # ALB & Security
 health_check_path = "/health"
 certificate_arn   = ""
-
-# JWT (provide during terraform apply)
-jwt_secret_key = "cR3QvM7K1Rr6O4M1kXo5pQzF9vM3eS9uZ5aXK1hYbJt8g2YQ7pP9kV4cFh6D0nW8HkLm2SxAqTzB5N7uC"
 
 # Debug
 debug = true
