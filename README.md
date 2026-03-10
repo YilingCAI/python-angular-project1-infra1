@@ -105,6 +105,8 @@ Shared workflow logic is implemented with composite actions:
 - `.github/actions/terraform-common/action.yml`: Terraform setup, AWS OIDC auth, backend render, init/validate, optional security checks.
 - `.github/actions/terraform-plan-common/action.yml`: Terraform plan, optional Infracost, plan artifact upload, optional PR comment.
 
+`terraform-common` restores cache for Terraform providers/modules (`~/.terraform.d/plugin-cache`, `environments/<env>/.terraform`) and TFLint plugins (`~/.tflint.d/plugins`) to speed repeated workflow runs.
+
 CI Terraform version is pinned to `1.10.5` in the shared action because `use_lockfile` backend locking requires Terraform `1.10+`.
 
 ### PR opened to `main`

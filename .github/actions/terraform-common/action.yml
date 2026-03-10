@@ -55,6 +55,23 @@ runs:
       with:
         terraform_version: 1.10.5
 
+    - name: Configure Terraform cache
+      shell: bash
+      run: |
+        mkdir -p "$HOME/.terraform.d/plugin-cache"
+        echo "TF_PLUGIN_CACHE_DIR=$HOME/.terraform.d/plugin-cache" >> "$GITHUB_ENV"
+
+    - name: Restore Terraform cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.terraform.d/plugin-cache
+          environments/${{ inputs.target_environment }}/.terraform
+        key: ${{ runner.os }}-terraform-${{ inputs.target_environment }}-${{ hashFiles('**/.terraform.lock.hcl') }}
+        restore-keys: |
+          ${{ runner.os }}-terraform-${{ inputs.target_environment }}-
+          ${{ runner.os }}-terraform-
+
     - name: Resolve AWS role ARN
       id: role
       shell: bash
@@ -148,6 +165,16 @@ runs:
       uses: terraform-linters/setup-tflint@v4
       with:
         tflint_version: v0.55.1
+
+    - name: Restore TFLint plugin cache
+      if: ${{ inputs.enable_security_checks == 'true' }}
+      uses: actions/cache@v4
+      with:
+        path: ~/.tflint.d/plugins
+        key: ${{ runner.os }}-tflint-${{ inputs.target_environment }}-${{ hashFiles('**/.terraform.lock.hcl') }}
+        restore-keys: |
+          ${{ runner.os }}-tflint-${{ inputs.target_environment }}-
+          ${{ runner.os }}-tflint-
 
     - name: Run TFLint
       if: ${{ inputs.enable_security_checks == 'true' }}
