@@ -89,6 +89,7 @@ jobs:
           else
             echo "var_file_arg=" >> "$GITHUB_OUTPUT"
             echo "terraform.tfvars not found in environments/${TF_ENV}; running with defaults and other provided vars."
+          fi
 
       - name: Download saved plan artifact
         if: inputs.operation == 'apply' && inputs.apply_use_saved_plan && inputs.saved_plan_artifact_name != ''
@@ -155,10 +156,12 @@ jobs:
 
       - name: Terraform apply
         if: inputs.operation == 'apply'
+        shell: bash
         run: |
           if [ "${{ inputs.apply_use_saved_plan }}" = "true" ]; then
             terraform -chdir="environments/${TF_ENV}" apply \
               -lock-timeout=5m \
+              -backend-config='backend.hcl' \
               -auto-approve \
               -input=false \
               "tfplan.binary"
