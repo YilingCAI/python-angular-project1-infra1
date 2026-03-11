@@ -35,6 +35,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
   pull-requests: write
 
 jobs:
@@ -55,11 +56,14 @@ jobs:
         with:
           target_environment: ${{ inputs.target_environment }}
           operation: plan
+          aws_region: ${{ vars.AWS_REGION }}
           terraform_plan_speculative: true
-          aws_auth_required: false
+          aws_auth_required: true
           jwt_secret_key: ${{ secrets.JWT_SECRET_KEY }}
           enable_security_checks: ${{ inputs.enable_security_checks }}
           checkov_enforcement: ${{ inputs.checkov_enforcement }}
+          aws_oidc_role_arn: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          role_session_name_prefix: gha-terraform-plan-speculative
 
       - name: Terraform shared plan steps
         uses: ./.github/actions/terraform-plan-common
@@ -77,6 +81,6 @@ jobs:
           echo "## Terraform Workflow Summary" >> "$GITHUB_STEP_SUMMARY"
           echo "- Environment: ${TF_ENV}" >> "$GITHUB_STEP_SUMMARY"
           echo "- Operation: plan (speculative)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Init mode: backend=false" >> "$GITHUB_STEP_SUMMARY"
-          echo "- AWS auth: disabled" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Init mode: local backend override (speculative)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- AWS auth: OIDC (read-only plan)" >> "$GITHUB_STEP_SUMMARY"
           echo "- Status: ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
