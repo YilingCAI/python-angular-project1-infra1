@@ -79,7 +79,7 @@ bootstrap-apply:
 	@$(call require_aws_env_file)
 	@echo "Applying bootstrap"
 	@$(MAKE) bootstrap-import-existing
-	@$(load_aws_env) $(check_aws_identity) cd "$(BOOTSTRAP_DIR)" && TF_DATA_DIR="$(TF_DATA_DIR)" $(TERRAFORM) apply -var-file="$(BOOTSTRAP_TFVARS_REL)" -auto-approve
+	@$(load_aws_env) $(check_aws_identity) cd "$(BOOTSTRAP_DIR)" && TF_DATA_DIR="$(TF_DATA_DIR)" $(TERRAFORM) apply -var-file="$(BOOTSTRAP_TFVARS_REL)" -auto-approve 
 
 bootstrap-destroy:
 	@$(call require_bootstrap_tfvars)

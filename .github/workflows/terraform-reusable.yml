@@ -161,7 +161,6 @@ jobs:
           if [ "${{ inputs.apply_use_saved_plan }}" = "true" ]; then
             terraform -chdir="environments/${TF_ENV}" apply \
               -lock-timeout=5m \
-              -backend-config='backend.hcl' \
               -auto-approve \
               -input=false \
               "tfplan.binary"
