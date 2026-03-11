@@ -96,15 +96,6 @@ resource "aws_secretsmanager_secret" "jwt_secret" {
   }
 }
 
-# Enable automatic rotation for JWT secret
-resource "aws_secretsmanager_secret_rotation" "jwt_secret" {
-  count     = var.enable_secret_rotation ? 1 : 0
-  secret_id = aws_secretsmanager_secret.jwt_secret.id
-  rotation_rules {
-    automatically_after_days = 30
-  }
-}
-
 resource "aws_secretsmanager_secret_version" "jwt_secret" {
   secret_id = aws_secretsmanager_secret.jwt_secret.id
   secret_string = jsonencode({
