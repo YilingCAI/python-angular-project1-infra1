@@ -21,7 +21,9 @@ github_oidc_subjects = [
   "repo:yilingcai/python-angular-project1-infra1:environment:staging",
   "repo:yilingcai/python-angular-project1-infra1:environment:prod",
   "repo:YilingCAI/python-angular-project1-infra1:ref:refs/heads/main",
-  "repo:yilingcai/python-angular-project1-infra1:ref:refs/heads/main"
+  "repo:yilingcai/python-angular-project1-infra1:ref:refs/heads/main",
+  "repo:YilingCAI/python-angular-project1-infra1:pull_request",
+  "repo:yilingcai/python-angular-project1-infra1:pull_request"
 ]
 
 oidc_thumbprints = [
