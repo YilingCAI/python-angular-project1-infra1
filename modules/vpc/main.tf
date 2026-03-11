@@ -8,6 +8,7 @@
 
 # Data source for current AWS account ID
 data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
 
 # VPC
 resource "aws_vpc" "main" {
@@ -43,11 +44,14 @@ resource "aws_flow_log" "main" {
 
 resource "aws_cloudwatch_log_group" "flow_logs" {
   name              = "/aws/vpc/flowlogs/${var.project_name}"
-  retention_in_days = 30
+  retention_in_days = 365
+  kms_key_id        = aws_kms_key.flow_logs.arn
 
   tags = {
     Name = "${var.project_name}-vpc-flow-logs"
   }
+
+  depends_on = [aws_kms_key_policy.flow_logs]
 }
 
 resource "aws_kms_key" "flow_logs" {
@@ -58,6 +62,41 @@ resource "aws_kms_key" "flow_logs" {
   tags = {
     Name = "${var.project_name}-flow-logs-key"
   }
+}
+
+# KMS Key Policy for VPC Flow Logs (CKV2_AWS_64)
+resource "aws_kms_key_policy" "flow_logs" {
+  key_id = aws_kms_key.flow_logs.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "Enable IAM User Permissions"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      },
+      {
+        Sid    = "Allow CloudWatch Logs to use the key"
+        Effect = "Allow"
+        Principal = {
+          Service = "logs.${data.aws_region.current.name}.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
 }
 
 resource "aws_iam_role" "flow_logs" {
@@ -85,13 +124,21 @@ resource "aws_iam_role_policy" "flow_logs" {
     Version = "2012-10-17"
     Statement = [
       {
+        Sid = "LogDelivery"
         Action = [
-          "logs:CreateLogGroup",
           "logs:CreateLogStream",
           "logs:PutLogEvents",
-          "logs:DescribeLogGroups",
           "logs:DescribeLogStreams"
         ]
+        Effect = "Allow"
+        Resource = [
+          aws_cloudwatch_log_group.flow_logs.arn,
+          "${aws_cloudwatch_log_group.flow_logs.arn}:log-stream:*"
+        ]
+      },
+      {
+        Sid      = "LogGroupDiscovery"
+        Action   = ["logs:DescribeLogGroups", "logs:CreateLogGroup"]
         Effect   = "Allow"
         Resource = "*"
       }
@@ -229,6 +276,8 @@ resource "aws_route_table_association" "database" {
 }
 
 # Security Group for ALB
+# checkov:skip=CKV_AWS_260:Port 80 is required for HTTP-to-HTTPS redirect; application traffic uses HTTPS only
+# checkov:skip=CKV2_AWS_5:Security group is attached to the ALB in the alb module (cross-module reference)
 resource "aws_security_group" "alb" {
   name_prefix = "${var.project_name}-alb-"
   description = "Security group for ALB - allows HTTP/HTTPS from internet"
@@ -272,6 +321,7 @@ resource "aws_security_group" "alb" {
 }
 
 # Security Group for ECS Tasks
+# checkov:skip=CKV2_AWS_5:Security group is attached to ECS tasks in the ecs-service module (cross-module reference)
 resource "aws_security_group" "ecs_tasks" {
   name_prefix = "${var.project_name}-ecs-tasks-"
   description = "Security group for ECS tasks - allows traffic from ALB"
@@ -315,6 +365,7 @@ resource "aws_security_group" "ecs_tasks" {
 }
 
 # Security Group for RDS
+# checkov:skip=CKV2_AWS_5:Security group is attached to the RDS instance in the rds module (cross-module reference)
 resource "aws_security_group" "rds" {
   name_prefix = "${var.project_name}-rds-"
   description = "Security group for RDS"

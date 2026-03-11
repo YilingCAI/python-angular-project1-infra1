@@ -22,3 +22,8 @@ output "frontend_target_group_arn" {
   description = "Frontend target group ARN"
   value       = aws_lb_target_group.frontend.arn
 }
+
+output "alb_arn_suffix" {
+  description = "ALB ARN suffix (for CloudWatch alarm and dashboard dimensions)"
+  value       = aws_lb.main.arn_suffix
+}

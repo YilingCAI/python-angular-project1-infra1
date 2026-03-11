@@ -30,5 +30,10 @@ output "vpc_id" {
 
 output "cloudwatch_dashboard_url" {
   description = "CloudWatch dashboard URL"
-  value       = "https://console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#dashboards:name=${var.project_name}-dashboard"
+  value       = module.monitoring.dashboard_url
+}
+
+output "monitoring_sns_topic_arn" {
+  description = "SNS topic ARN for monitoring alerts"
+  value       = module.monitoring.sns_topic_arn
 }

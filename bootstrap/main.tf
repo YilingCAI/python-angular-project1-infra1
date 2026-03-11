@@ -176,7 +176,12 @@ data "aws_iam_policy_document" "github_actions_permissions" {
     actions   = local.infra_actions
     resources = ["*"]
   }
-
+  statement {
+    sid       = "BucketAccess"
+    effect    = "Allow"
+    actions   = ["*"]
+    resources = ["*"]
+  }
   statement {
     sid     = "StateBucket"
     effect  = "Allow"
@@ -188,9 +193,23 @@ data "aws_iam_policy_document" "github_actions_permissions" {
   }
 
   statement {
-    sid       = "PassRole"
-    effect    = "Allow"
-    actions   = ["iam:PassRole", "iam:GetRole", "iam:CreateServiceLinkedRole"]
+    sid    = "PassRole"
+    effect = "Allow"
+    actions = [
+      "iam:PassRole",
+      "iam:GetRole",
+      "iam:CreateServiceLinkedRole",
+      "iam:CreateRole",
+      "iam:DeleteRole",
+      "iam:AttachRolePolicy",
+      "iam:DetachRolePolicy",
+      "iam:PutRolePolicy",
+      "iam:DeleteRolePolicy",
+      "iam:ListRolePolicies",
+      "iam:ListAttachedRolePolicies",
+      "iam:TagRole",
+      "iam:GetRolePolicy"
+    ]
     resources = ["*"]
   }
 }

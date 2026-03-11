@@ -1,10 +1,60 @@
+data "aws_caller_identity" "current" {}
+
+# KMS Key for frontend CloudWatch Logs (CKV_AWS_158, CKV2_AWS_64)
+resource "aws_kms_key" "frontend_logs" {
+  description             = "KMS key for frontend ECS CloudWatch Logs"
+  deletion_window_in_days = 10
+  enable_key_rotation     = true
+
+  tags = {
+    Name = "${var.project_name}-frontend-logs-key"
+  }
+}
+
+resource "aws_kms_key_policy" "frontend_logs" {
+  key_id = aws_kms_key.frontend_logs.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "Enable IAM User Permissions"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      },
+      {
+        Sid    = "Allow CloudWatch Logs to use the key"
+        Effect = "Allow"
+        Principal = {
+          Service = "logs.${var.aws_region}.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
 resource "aws_cloudwatch_log_group" "frontend" {
   name              = "/ecs/${var.project_name}-frontend"
-  retention_in_days = 30
+  retention_in_days = 365
+  kms_key_id        = aws_kms_key.frontend_logs.arn
 
   tags = {
     Name = "${var.project_name}-frontend-logs"
   }
+
+  depends_on = [aws_kms_key_policy.frontend_logs]
 }
 
 resource "aws_iam_role" "ecs_task_execution" {
@@ -82,6 +132,11 @@ resource "aws_ecs_service" "frontend" {
     target_group_arn = var.target_group_arn
     container_name   = "${var.project_name}-frontend"
     container_port   = var.frontend_port
+  }
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = false
   }
 
   depends_on = [aws_ecs_task_definition.frontend]

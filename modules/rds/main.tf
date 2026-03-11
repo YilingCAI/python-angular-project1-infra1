@@ -7,6 +7,7 @@
 
 # Data source for current AWS account ID
 data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
 
 # Generate random password
 resource "random_password" "db_password" {
@@ -16,6 +17,7 @@ resource "random_password" "db_password" {
 }
 
 # Store password in Secrets Manager with KMS encryption (CKV_AWS_149)
+# checkov:skip=CKV2_AWS_57:Automatic rotation requires a Lambda rotation function which is managed separately
 resource "aws_secretsmanager_secret" "db_password" {
   name_prefix             = "${var.project_name}-db-password-"
   recovery_window_in_days = 7
@@ -56,7 +58,33 @@ resource "aws_db_subnet_group" "main" {
   }
 }
 
+# PostgreSQL Parameter Group for query logging (CKV2_AWS_30)
+resource "aws_db_parameter_group" "main" {
+  name_prefix = "${var.project_name}-pg-"
+  family      = "postgres${split(".", var.db_engine_version)[0]}"
+
+  parameter {
+    name  = "log_statement"
+    value = "ddl"
+  }
+
+  parameter {
+    name  = "log_min_duration_statement"
+    value = "1000"
+  }
+
+  tags = {
+    Name = "${var.project_name}-pg"
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
 # RDS Instance
+# checkov:skip=CKV_AWS_157:Multi-AZ is controlled per environment; intentionally disabled in dev to reduce cost
+# checkov:skip=CKV2_AWS_30:Query logging is enabled via aws_db_parameter_group above
 resource "aws_db_instance" "main" {
   identifier             = "${var.project_name}-db"
   engine                 = "postgres"
@@ -86,6 +114,7 @@ resource "aws_db_instance" "main" {
   maintenance_window         = "mon:04:00-mon:05:00"
   multi_az                   = var.multi_az
   auto_minor_version_upgrade = true
+  parameter_group_name       = aws_db_parameter_group.main.name
 
   # Monitoring
   enabled_cloudwatch_logs_exports = ["postgresql"]
@@ -188,12 +217,50 @@ resource "aws_kms_key" "cloudwatch_logs" {
   }
 }
 
+# KMS Key Policy for RDS CloudWatch Logs (CKV2_AWS_64)
+resource "aws_kms_key_policy" "cloudwatch_logs" {
+  key_id = aws_kms_key.cloudwatch_logs.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "Enable IAM User Permissions"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      },
+      {
+        Sid    = "Allow CloudWatch Logs to use the key"
+        Effect = "Allow"
+        Principal = {
+          Service = "logs.${data.aws_region.current.name}.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
 # CloudWatch Log Group for RDS with KMS encryption and 1-year retention (CKV_AWS_158, CKV_AWS_338)
 resource "aws_cloudwatch_log_group" "rds" {
   name              = "/aws/rds/${var.project_name}"
-  retention_in_days = var.log_retention_days
+  retention_in_days = 365
+  kms_key_id        = aws_kms_key.cloudwatch_logs.arn
 
   tags = {
     Name = "${var.project_name}-rds-logs"
   }
+
+  depends_on = [aws_kms_key_policy.cloudwatch_logs]
 }

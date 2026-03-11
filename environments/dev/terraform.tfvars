@@ -22,8 +22,8 @@ multi_az                 = false
 log_retention_days       = 3
 
 # ECS
-ecr_repository_url          = "248547463735.dkr.ecr.us-east-1.amazonaws.com/mypythonproject1/backend"
-frontend_ecr_repository_url = "248547463735.dkr.ecr.us-east-1.amazonaws.com/mypythonproject1/frontend"
+ecr_repository_url          = "388252587928.dkr.ecr.us-east-1.amazonaws.com/mypythonproject1/backend"
+frontend_ecr_repository_url = "388252587928.dkr.ecr.us-east-1.amazonaws.com/mypythonproject1/frontend"
 image_tag                   = "dev"
 frontend_image_tag          = "dev"
 task_cpu                    = "256"
@@ -41,3 +41,9 @@ certificate_arn   = ""
 
 # Debug
 debug = true
+
+# Monitoring
+alert_email          = "" # Add your email to receive CloudWatch alarm notifications
+ecs_cpu_threshold    = 80
+ecs_memory_threshold = 85
+rds_cpu_threshold    = 80

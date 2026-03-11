@@ -86,6 +86,7 @@ module "alb" {
 }
 
 # JWT Secret in Secrets Manager (referenced by ECS)
+# checkov:skip=CKV2_AWS_57:Automatic rotation requires a Lambda rotation function which is managed separately
 resource "aws_secretsmanager_secret" "jwt_secret" {
   name_prefix             = "${var.project_name}-jwt-secret-"
   recovery_window_in_days = 7
@@ -217,35 +218,21 @@ module "ecs_frontend" {
   depends_on = [module.alb, module.ecs]
 }
 
-# CloudWatch Dashboard for monitoring
-resource "aws_cloudwatch_dashboard" "main" {
-  dashboard_name = "${var.project_name}-dashboard"
+module "monitoring" {
+  source = "../../modules/monitoring"
 
-  dashboard_body = jsonencode({
-    widgets = [
-      {
-        type = "metric"
-        properties = {
-          metrics = [
-            ["AWS/ECS", "CPUUtilization", { stat = "Average" }],
-            [".", "MemoryUtilization", { stat = "Average" }],
-            ["AWS/RDS", "CPUUtilization", { stat = "Average" }],
-            [".", "DatabaseConnections", { stat = "Average" }]
-          ]
-          period = 300
-          stat   = "Average"
-          region = var.aws_region
-          title  = "Infrastructure Metrics"
-        }
-      },
-      {
-        type = "log"
-        properties = {
-          query  = "fields @timestamp, @message | stats count() by bin(5m)"
-          region = var.aws_region
-          title  = "Log Insights"
-        }
-      }
-    ]
-  })
+  project_name           = var.project_name
+  aws_region             = var.aws_region
+  cluster_name           = module.ecs.cluster_name
+  ecs_service_name       = module.ecs.service_name
+  frontend_service_name  = module.ecs_frontend.service_name
+  db_instance_identifier = "${var.project_name}-db"
+  alb_arn_suffix         = module.alb.alb_arn_suffix
+  log_group_name         = module.ecs.log_group_name
+  alert_email            = var.alert_email
+  ecs_cpu_threshold      = var.ecs_cpu_threshold
+  ecs_memory_threshold   = var.ecs_memory_threshold
+  rds_cpu_threshold      = var.rds_cpu_threshold
+
+  depends_on = [module.ecs, module.ecs_frontend, module.rds, module.alb]
 }
