@@ -44,6 +44,7 @@ runs:
       shell: bash
       run: |
         ls -al environments/${{ inputs.target_environment }}/
+        ls -al environments/${{ inputs.target_environment }}/.terraform/
 
     - name: Terraform plan (speculative)
       if: ${{ inputs.speculative_plan == 'true' }}
