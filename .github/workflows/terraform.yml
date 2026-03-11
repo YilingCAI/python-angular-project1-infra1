@@ -114,7 +114,6 @@ jobs:
       enable_security_checks: true
       checkov_enforcement: advisory
       enable_pr_comment: false
-      enable_infracost: true
     secrets: inherit
 
   plan-staging-main:
@@ -127,7 +126,6 @@ jobs:
       enable_security_checks: true
       checkov_enforcement: advisory
       enable_pr_comment: false
-      enable_infracost: true
     secrets: inherit
 
   plan-prod-main:
@@ -140,7 +138,6 @@ jobs:
       enable_security_checks: true
       checkov_enforcement: advisory
       enable_pr_comment: false
-      enable_infracost: true
     secrets: inherit
 
   apply-dev:

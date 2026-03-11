@@ -22,8 +22,8 @@ multi_az                 = true
 log_retention_days       = 30
 
 # ECS
-ecr_repository_url         = "381492246543.dkr.ecr.us-east-1.amazonaws.com/mypythonproject1/backend"
-frontend_ecr_repository_url = "381492246543.dkr.ecr.us-east-1.amazonaws.com/mypythonproject1/frontend"
+ecr_repository_url         = "388252587928.dkr.ecr.us-east-1.amazonaws.com/mypythonproject1/backend"
+frontend_ecr_repository_url = "388252587928.dkr.ecr.us-east-1.amazonaws.com/mypythonproject1/frontend"
 image_tag                 = "latest"
 frontend_image_tag        = "latest"
 task_cpu                  = "1024"

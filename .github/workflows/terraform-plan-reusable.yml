@@ -32,17 +32,10 @@ on:
         required: false
         type: boolean
         default: true
-      enable_infracost:
-        description: Run Infracost when API key exists
-        required: false
-        type: boolean
-        default: true
     secrets:
       JWT_SECRET_KEY:
         required: true
       TERRAFORM_STATE_BUCKET:
-        required: false
-      INFRACOST_API_KEY:
         required: false
 
 permissions:
@@ -60,7 +53,6 @@ jobs:
     environment: ${{ inputs.github_environment != '' && inputs.github_environment || inputs.target_environment }}
     env:
       TF_ENV: ${{ inputs.target_environment }}
-      INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -85,8 +77,8 @@ jobs:
         with:
           target_environment: ${{ inputs.target_environment }}
           speculative_plan: false
-          enable_infracost: ${{ inputs.enable_infracost }}
-          infracost_api_key: ${{ secrets.INFRACOST_API_KEY }}
+          enable_infracost: false
+          infracost_api_key: ""
           enable_pr_comment: ${{ inputs.enable_pr_comment }}
 
       - name: Workflow summary
