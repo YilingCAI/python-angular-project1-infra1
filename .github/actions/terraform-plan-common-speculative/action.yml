@@ -37,6 +37,7 @@ runs:
         fi
 
     - name: Debug Terraform folder
+      shell: bash
       run: |
         ls -la environments/${{ inputs.target_environment }}
 
