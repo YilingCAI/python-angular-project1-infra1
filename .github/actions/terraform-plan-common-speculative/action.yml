@@ -36,12 +36,18 @@ runs:
           echo "terraform.tfvars not found in ${ENV_DIR}; running with defaults and other provided vars."
         fi
 
+    - name: Debug Terraform folder
+      run: |
+        ls -la environments/${{ inputs.target_environment }}
+
     - name: Terraform plan (speculative)
       shell: bash
       run: |
         terraform -chdir="environments/${{ inputs.target_environment }}" plan \
           ${{ steps.vars.outputs.var_file_arg }} \
           -lock=false \
+          -input=false \
+          -detailed-exitcode \
           -no-color 2>&1 | tee "environments/${{ inputs.target_environment }}/plan-output.txt"
 
     - name: Setup Infracost

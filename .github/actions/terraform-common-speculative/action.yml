@@ -67,7 +67,7 @@ runs:
       run: |
         terraform -chdir="environments/${{ inputs.target_environment }}" init \
           -backend=false \
-          -reconfigure \
+          -input=false \
           -upgrade
 
     - name: Terraform validate
