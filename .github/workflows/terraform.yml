@@ -106,7 +106,7 @@ jobs:
     secrets: inherit
 
   plan-dev-main:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'dev' && inputs.action == 'plan')
     uses: ./.github/workflows/terraform-plan-reusable.yml
     with:
       target_environment: dev
@@ -118,7 +118,7 @@ jobs:
 
   plan-staging-main:
     needs: [plan-dev-main]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: always() && ((github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.plan-dev-main.result == 'success') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging' && inputs.action == 'plan'))
     uses: ./.github/workflows/terraform-plan-reusable.yml
     with:
       target_environment: staging
@@ -130,7 +130,7 @@ jobs:
 
   plan-prod-main:
     needs: [plan-staging-main]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: always() && ((github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.plan-staging-main.result == 'success') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'prod' && inputs.action == 'plan'))
     uses: ./.github/workflows/terraform-plan-reusable.yml
     with:
       target_environment: prod
@@ -142,36 +142,39 @@ jobs:
 
   apply-dev:
     needs: [plan-prod-main]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: always() && ((github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.plan-prod-main.result == 'success') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'dev' && inputs.action == 'apply'))
     uses: ./.github/workflows/terraform-reusable.yml
     with:
       target_environment: dev
       github_environment: dev
       operation: apply
-      apply_use_saved_plan: true
+      checkov_enforcement: advisory
+      apply_use_saved_plan: ${{ github.event_name != 'workflow_dispatch' }}
       saved_plan_artifact_name: terraform-plan-dev
     secrets: inherit
 
   apply-staging:
     needs: [apply-dev]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: always() && ((github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.apply-dev.result == 'success') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging' && inputs.action == 'apply'))
     uses: ./.github/workflows/terraform-reusable.yml
     with:
       target_environment: staging
       github_environment: staging
       operation: apply
-      apply_use_saved_plan: true
+      checkov_enforcement: advisory
+      apply_use_saved_plan: ${{ github.event_name != 'workflow_dispatch' }}
       saved_plan_artifact_name: terraform-plan-staging
     secrets: inherit
 
   apply-prod:
     needs: [apply-staging]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: always() && ((github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.apply-staging.result == 'success') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'prod' && inputs.action == 'apply'))
     uses: ./.github/workflows/terraform-reusable.yml
     with:
       target_environment: prod
       github_environment: prod
       operation: apply
-      apply_use_saved_plan: true
+      checkov_enforcement: advisory
+      apply_use_saved_plan: ${{ github.event_name != 'workflow_dispatch' }}
       saved_plan_artifact_name: terraform-plan-prod
     secrets: inherit
