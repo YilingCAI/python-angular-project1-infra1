@@ -90,9 +90,8 @@ runs:
       shell: bash
       run: |
         rm -f "environments/${{ inputs.target_environment }}/backend.hcl"
-        rm -f "environments/${{ inputs.target_environment }}/.terraform/terraform.tfstate"
-        rm -f "environments/${{ inputs.target_environment }}/.terraform/terraform.tfstate.backup"
-
+        rm -rf "environments/${{ inputs.target_environment }}/.terraform/"
+        
     - name: Resolve AWS role ARN
       if: ${{ inputs.aws_auth_required == 'true' }}
       id: role
