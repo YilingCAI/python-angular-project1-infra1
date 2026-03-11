@@ -71,7 +71,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: ~/.terraform.d/plugin-cache
-        key: ${{ runner.os }}-terraform-${{ inputs.target_environment }}-${{ hashFiles('environments/${{ inputs.target_environment }}/.terraform.lock.hcl') }}
+        key: ${{ runner.os }}-terraform-${{ inputs.target_environment }}-${{ hashFiles(format('environments/{0}/.terraform.lock.hcl', inputs.target_environment)) }}
         restore-keys: |
           ${{ runner.os }}-terraform-${{ inputs.target_environment }}-
           ${{ runner.os }}-terraform-
@@ -81,7 +81,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: environments/${{ inputs.target_environment }}/.terraform
-        key: ${{ runner.os }}-terraform-workdir-${{ inputs.target_environment }}-${{ hashFiles('environments/${{ inputs.target_environment }}/.terraform.lock.hcl') }}
+        key: ${{ runner.os }}-terraform-workdir-${{ inputs.target_environment }}-${{ hashFiles(format('environments/{0}/.terraform.lock.hcl', inputs.target_environment)) }}
         restore-keys: |
           ${{ runner.os }}-terraform-workdir-${{ inputs.target_environment }}-
 
@@ -188,6 +188,7 @@ runs:
       run: |
         terraform -chdir="environments/${{ inputs.target_environment }}" init \
           -backend-config=backend.hcl \
+          -backend-config="key=${{ inputs.target_environment }}/terraform.tfstate" \
           -reconfigure \
           -input=false
 
@@ -237,7 +238,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: ~/.tflint.d/plugins
-        key: ${{ runner.os }}-tflint-${{ inputs.target_environment }}-${{ hashFiles('**/.terraform.lock.hcl') }}
+        key: ${{ runner.os }}-tflint-${{ inputs.target_environment }}-${{ hashFiles(format('environments/{0}/.terraform.lock.hcl', inputs.target_environment)) }}
         restore-keys: |
           ${{ runner.os }}-tflint-${{ inputs.target_environment }}-
           ${{ runner.os }}-tflint-
