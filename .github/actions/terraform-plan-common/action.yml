@@ -47,7 +47,12 @@ runs:
         terraform -chdir="environments/${{ inputs.target_environment }}" plan \
           ${{ steps.vars.outputs.var_file_arg }} \
           -lock=false \
-          -no-color 2>&1 | tee "environments/${{ inputs.target_environment }}/plan-output.txt"
+          -input=false \
+          -out="plan.tfplan"
+
+        terraform -chdir="environments/${{ inputs.target_environment }}" show \
+          -no-color \
+          "plan.tfplan" > "environments/${{ inputs.target_environment }}/plan-output.txt"
 
     - name: Terraform plan (real)
       if: ${{ inputs.speculative_plan != 'true' }}
@@ -82,6 +87,7 @@ runs:
         if-no-files-found: ignore
         path: |
           environments/${{ inputs.target_environment }}/plan-output.txt
+          environments/${{ inputs.target_environment }}/plan.tfplan
           environments/${{ inputs.target_environment }}/tfplan.binary
           environments/${{ inputs.target_environment }}/infracost.json
 

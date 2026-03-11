@@ -30,8 +30,6 @@ on:
     secrets:
       JWT_SECRET_KEY:
         required: true
-      TERRAFORM_STATE_BUCKET:
-        required: false
       INFRACOST_API_KEY:
         required: false
 
@@ -48,23 +46,26 @@ jobs:
       cancel-in-progress: false
     env:
       TF_ENV: ${{ inputs.target_environment }}
-      INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Terraform common setup and checks
-        uses: ./.github/actions/terraform-common-speculative
+        uses: ./.github/actions/terraform-common
         with:
           target_environment: ${{ inputs.target_environment }}
+          operation: plan
+          terraform_plan_speculative: true
+          aws_auth_required: false
           jwt_secret_key: ${{ secrets.JWT_SECRET_KEY }}
           enable_security_checks: ${{ inputs.enable_security_checks }}
           checkov_enforcement: ${{ inputs.checkov_enforcement }}
 
       - name: Terraform shared plan steps
-        uses: ./.github/actions/terraform-plan-common-speculative
+        uses: ./.github/actions/terraform-plan-common
         with:
           target_environment: ${{ inputs.target_environment }}
+          speculative_plan: true
           enable_infracost: ${{ inputs.enable_infracost }}
           infracost_api_key: ${{ secrets.INFRACOST_API_KEY }}
           enable_pr_comment: ${{ inputs.enable_pr_comment }}

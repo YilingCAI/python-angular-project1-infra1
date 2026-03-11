@@ -11,15 +11,16 @@ inputs:
     required: true
   aws_region:
     description: AWS region used for auth and backend config
-    required: true
+    required: false
+    default: us-east-1
   terraform_state_bucket:
     description: Terraform state bucket name
     required: false
     default: ""
-  terraform_init_backend:
-    description: Initialize Terraform with remote backend (true) or backend disabled (false)
+  terraform_plan_speculative:
+    description: Run Terraform in speculative mode (true disables remote backend init)
     required: false
-    default: "true"
+    default: "false"
   aws_auth_required:
     description: Whether AWS OIDC authentication is required for this run
     required: false
@@ -50,8 +51,8 @@ runs:
     - name: Validate backend/auth combination
       shell: bash
       run: |
-        if [ "${{ inputs.terraform_init_backend }}" = "true" ] && [ "${{ inputs.aws_auth_required }}" != "true" ]; then
-          echo "Invalid configuration: terraform_init_backend=true requires aws_auth_required=true." >&2
+        if [ "${{ inputs.terraform_plan_speculative }}" != "true" ] && [ "${{ inputs.aws_auth_required }}" != "true" ]; then
+          echo "Invalid configuration: terraform_plan_speculative=false requires aws_auth_required=true." >&2
           exit 1
         fi
 
@@ -70,28 +71,22 @@ runs:
       uses: actions/cache@v4
       with:
         path: ~/.terraform.d/plugin-cache
-        key: ${{ runner.os }}-terraform-${{ inputs.target_environment }}-${{ hashFiles('**/.terraform.lock.hcl') }}
+        key: ${{ runner.os }}-terraform-${{ inputs.target_environment }}-${{ hashFiles('environments/${{ inputs.target_environment }}/.terraform.lock.hcl') }}
         restore-keys: |
           ${{ runner.os }}-terraform-${{ inputs.target_environment }}-
           ${{ runner.os }}-terraform-
 
     - name: Restore Terraform working directory cache
-      if: ${{ inputs.terraform_init_backend == 'true' }}
+      if: ${{ inputs.terraform_plan_speculative != 'true' }}
       uses: actions/cache@v4
       with:
         path: environments/${{ inputs.target_environment }}/.terraform
-        key: ${{ runner.os }}-terraform-workdir-${{ inputs.target_environment }}-${{ hashFiles('**/.terraform.lock.hcl') }}
+        key: ${{ runner.os }}-terraform-workdir-${{ inputs.target_environment }}-${{ hashFiles('environments/${{ inputs.target_environment }}/.terraform.lock.hcl') }}
         restore-keys: |
           ${{ runner.os }}-terraform-workdir-${{ inputs.target_environment }}-
 
-    - name: Isolate backend-disabled Terraform data dir
-      if: ${{ inputs.terraform_init_backend != 'true' }}
-      shell: bash
-      run: |
-        echo "TF_DATA_DIR=/tmp/tfdata-${{ inputs.target_environment }}-${{ github.run_id }}-${{ github.run_attempt }}" >> "$GITHUB_ENV"
-
     - name: Remove stale backend metadata for backend-disabled mode
-      if: ${{ inputs.terraform_init_backend != 'true' }}
+      if: ${{ inputs.terraform_plan_speculative == 'true' }}
       shell: bash
       run: |
         rm -f "environments/${{ inputs.target_environment }}/backend.hcl"
@@ -136,24 +131,43 @@ runs:
       env:
         EXPECTED_ROLE_ARN: ${{ steps.role.outputs.role_arn }}
       run: |
-        ACTUAL_ARN=$(aws sts get-caller-identity --query Arn --output text)
         EXPECTED_ROLE_NAME="${EXPECTED_ROLE_ARN##*/}"
+        MAX_ATTEMPTS=6
+        RETRY_DELAY_SECONDS=5
+        ACTUAL_ARN=""
 
-        if ! printf '%s' "$ACTUAL_ARN" | grep -Eq ":assumed-role/${EXPECTED_ROLE_NAME}/"; then
-          echo "OIDC role assumption mismatch. Expected assumed role '${EXPECTED_ROLE_NAME}' from '${EXPECTED_ROLE_ARN}', got '${ACTUAL_ARN}'." >&2
-          exit 1
-        fi
+        for ATTEMPT in $(seq 1 "$MAX_ATTEMPTS"); do
+          # Add CLI-level network timeouts and retry to handle transient STS propagation delays.
+          if ACTUAL_ARN=$(aws sts get-caller-identity \
+            --query Arn \
+            --output text \
+            --cli-connect-timeout 5 \
+            --cli-read-timeout 10 2>/dev/null); then
+            if printf '%s' "$ACTUAL_ARN" | grep -Eq ":assumed-role/${EXPECTED_ROLE_NAME}/"; then
+              echo "Verified assumed role on attempt ${ATTEMPT}/${MAX_ATTEMPTS}: ${ACTUAL_ARN}"
+              exit 0
+            fi
+          fi
+
+          if [ "$ATTEMPT" -lt "$MAX_ATTEMPTS" ]; then
+            echo "Assumed role not ready yet (attempt ${ATTEMPT}/${MAX_ATTEMPTS}). Retrying in ${RETRY_DELAY_SECONDS}s..."
+            sleep "$RETRY_DELAY_SECONDS"
+          fi
+        done
+
+        echo "OIDC role assumption mismatch after ${MAX_ATTEMPTS} attempts. Expected assumed role '${EXPECTED_ROLE_NAME}' from '${EXPECTED_ROLE_ARN}', got '${ACTUAL_ARN}'." >&2
+        exit 1
 
     - name: Export sensitive Terraform vars
       shell: bash
       run: echo "TF_VAR_jwt_secret_key=${{ inputs.jwt_secret_key }}" >> "$GITHUB_ENV"
 
     - name: Render backend config
-      if: ${{ inputs.terraform_init_backend == 'true' }}
+      if: ${{ inputs.terraform_plan_speculative != 'true' }}
       shell: bash
       run: |
         if [ -z "${{ inputs.terraform_state_bucket }}" ]; then
-          echo "TERRAFORM_STATE_BUCKET is required when terraform_init_backend=true." >&2
+          echo "TERRAFORM_STATE_BUCKET is required when terraform_plan_speculative=false." >&2
           exit 1
         fi
 
@@ -170,23 +184,22 @@ runs:
       run: terraform -chdir="environments/${{ inputs.target_environment }}" fmt -check -recursive
 
     - name: Terraform init (backend)
-      if: ${{ inputs.terraform_init_backend == 'true' }}
+      if: ${{ inputs.terraform_plan_speculative != 'true' }}
       shell: bash
       run: |
         terraform -chdir="environments/${{ inputs.target_environment }}" init \
           -backend-config=backend.hcl \
-          -backend-config="key=${{ inputs.target_environment }}/terraform.tfstate" \
           -reconfigure \
-          -upgrade
+          -input=false
 
-    - name: Terraform init (speculative)
-      if: ${{ inputs.terraform_init_backend != 'true' }}
+    - name: Terraform init (backend disabled)
+      if: ${{ inputs.terraform_plan_speculative == 'true' }}
       shell: bash
       run: |
         terraform -chdir="environments/${{ inputs.target_environment }}" init \
           -backend=false \
           -reconfigure \
-          -upgrade
+          -input=false
 
     - name: Terraform validate
       shell: bash
@@ -194,6 +207,7 @@ runs:
 
     - name: Run Checkov scan
       if: ${{ inputs.enable_security_checks == 'true' }}
+      continue-on-error: ${{ inputs.checkov_enforcement == 'advisory' }}
       shell: bash
       run: |
         if [ "${{ inputs.checkov_enforcement }}" = "advisory" ]; then

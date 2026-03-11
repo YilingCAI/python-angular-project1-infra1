@@ -64,7 +64,7 @@ jobs:
           operation: plan
           aws_region: ${{ vars.AWS_REGION }}
           terraform_state_bucket: ${{ secrets.TERRAFORM_STATE_BUCKET }}
-          terraform_init_backend: ${{ inputs.terraform_init_backend }}
+          terraform_plan_speculative: ${{ !inputs.terraform_init_backend }}
           aws_auth_required: true
           jwt_secret_key: ${{ secrets.JWT_SECRET_KEY }}
           enable_security_checks: ${{ inputs.enable_security_checks }}
