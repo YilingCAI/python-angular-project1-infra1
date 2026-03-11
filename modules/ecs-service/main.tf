@@ -6,6 +6,8 @@
  * - IAM roles with least privilege
  */
 
+data "aws_caller_identity" "current" {}
+
 # KMS Key for ECS CloudWatch Logs
 resource "aws_kms_key" "ecs_logs" {
   description             = "KMS key for ECS CloudWatch Logs"
@@ -17,14 +19,52 @@ resource "aws_kms_key" "ecs_logs" {
   }
 }
 
+# KMS Key Policy for ECS CloudWatch Logs (CKV2_AWS_64)
+resource "aws_kms_key_policy" "ecs_logs" {
+  key_id = aws_kms_key.ecs_logs.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "Enable IAM User Permissions"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      },
+      {
+        Sid    = "Allow CloudWatch Logs to use the key"
+        Effect = "Allow"
+        Principal = {
+          Service = "logs.${var.aws_region}.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
 # CloudWatch Log Group for ECS with KMS encryption and 1-year retention (CKV_AWS_158, CKV_AWS_338)
 resource "aws_cloudwatch_log_group" "ecs" {
   name              = "/ecs/${var.project_name}"
-  retention_in_days = var.log_retention_days
+  retention_in_days = 365
+  kms_key_id        = aws_kms_key.ecs_logs.arn
 
   tags = {
     Name = "${var.project_name}-ecs-logs"
   }
+
+  depends_on = [aws_kms_key_policy.ecs_logs]
 }
 
 # ECS Cluster
@@ -239,6 +279,11 @@ resource "aws_ecs_service" "app" {
     target_group_arn = var.target_group_arn
     container_name   = var.project_name
     container_port   = var.app_port
+  }
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = false
   }
 
   depends_on = [

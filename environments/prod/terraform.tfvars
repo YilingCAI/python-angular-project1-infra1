@@ -44,3 +44,9 @@ certificate_arn   = "" # REQUIRED: Add your ACM certificate ARN here for product
 
 # Debug
 debug = false
+
+# Monitoring
+alert_email          = "" # REQUIRED: Add your ops email to receive CloudWatch alarm notifications
+ecs_cpu_threshold    = 70
+ecs_memory_threshold = 75
+rds_cpu_threshold    = 70

@@ -1,6 +1,6 @@
-aws_region   = "us-east-1"
-project_name = "mypythonproject1"
-expected_account_id = "388252587928"
+aws_region          = "us-east-1"
+project_name        = "mypythonproject1"
+expected_account_id = "381492128561"
 
 environments = ["dev", "staging", "prod"]
 
@@ -11,7 +11,7 @@ state_bucket_names = {
   prod    = "mypythonproject1-tfstate-prod"
 }
 
-github_actions_role_name  = "GitHubActionsRole"
+github_actions_role_name = "GitHubActionsRole"
 
 github_oidc_subjects = [
   "repo:YilingCAI/python-angular-project1-infra1:environment:dev",

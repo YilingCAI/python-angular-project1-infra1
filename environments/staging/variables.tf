@@ -228,6 +228,31 @@ variable "log_retention_days" {
   default     = 7
 }
 
+# Monitoring
+variable "alert_email" {
+  description = "Email address for CloudWatch alarm notifications (empty = no SNS subscription)"
+  type        = string
+  default     = ""
+}
+
+variable "ecs_cpu_threshold" {
+  description = "ECS CPU utilization alarm threshold (%)"
+  type        = number
+  default     = 80
+}
+
+variable "ecs_memory_threshold" {
+  description = "ECS memory utilization alarm threshold (%)"
+  type        = number
+  default     = 85
+}
+
+variable "rds_cpu_threshold" {
+  description = "RDS CPU utilization alarm threshold (%)"
+  type        = number
+  default     = 80
+}
+
 # Debug
 variable "debug" {
   description = "Enable debug mode"

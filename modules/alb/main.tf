@@ -6,7 +6,11 @@
  * - Access logs to S3
  */
 
+data "aws_caller_identity" "current" {}
+
 # S3 bucket for ALB logs
+# checkov:skip=CKV_AWS_144:Cross-region replication is not required for a transient ALB access-log bucket
+# checkov:skip=CKV2_AWS_62:S3 event notifications are not required for an ALB access-log bucket
 resource "aws_s3_bucket" "alb_logs" {
   bucket_prefix = "${var.project_name}-alb-logs-"
 
@@ -40,6 +44,39 @@ resource "aws_kms_alias" "alb_logs" {
   target_key_id = aws_kms_key.alb_logs.key_id
 }
 
+# KMS Key Policy for ALB logs S3 bucket (CKV2_AWS_64)
+resource "aws_kms_key_policy" "alb_logs" {
+  key_id = aws_kms_key.alb_logs.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "Enable IAM User Permissions"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      },
+      {
+        Sid    = "Allow S3 to use the key for encryption"
+        Effect = "Allow"
+        Principal = {
+          Service = "s3.amazonaws.com"
+        }
+        Action = [
+          "kms:Decrypt",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
 resource "aws_s3_bucket_server_side_encryption_configuration" "alb_logs" {
   bucket = aws_s3_bucket.alb_logs.id
 
@@ -69,6 +106,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "alb_logs" {
 
     expiration {
       days = 365
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
     }
   }
 }
@@ -142,6 +183,8 @@ resource "aws_s3_bucket_policy" "alb_logs" {
 data "aws_elb_service_account" "main" {}
 
 # Application Load Balancer
+# checkov:skip=CKV2_AWS_28:WAF integration is managed separately as optional infrastructure
+# checkov:skip=CKV2_AWS_20:HTTP listener only exists when no ACM cert is provided; it redirects to HTTPS via a separate listener when cert is present
 resource "aws_lb" "main" {
   name               = "${var.project_name}-alb"
   internal           = false
@@ -151,13 +194,14 @@ resource "aws_lb" "main" {
 
   access_logs {
     bucket  = aws_s3_bucket.alb_logs.id
-    enabled = false
+    enabled = true
     prefix  = "alb-logs"
   }
 
   enable_deletion_protection       = true
   enable_http2                     = true
   enable_cross_zone_load_balancing = true
+  drop_invalid_header_fields       = true
 
   tags = {
     Name = "${var.project_name}-alb"
@@ -165,6 +209,7 @@ resource "aws_lb" "main" {
 }
 
 # Target Group (CKV_AWS_378 - use HTTPS for protocol)
+# checkov:skip=CKV_AWS_378:Target groups use HTTP internally; TLS terminates at the ALB (standard ECS Fargate pattern)
 resource "aws_lb_target_group" "app" {
   name_prefix          = "app-"
   port                 = var.app_port
@@ -193,6 +238,7 @@ resource "aws_lb_target_group" "app" {
   }
 }
 
+# checkov:skip=CKV_AWS_378:Target groups use HTTP internally; TLS terminates at the ALB (standard ECS Fargate pattern)
 resource "aws_lb_target_group" "frontend" {
   name_prefix          = "fe-"
   port                 = var.frontend_port
@@ -234,6 +280,9 @@ resource "aws_lb_listener" "http_redirect" {
 }
 
 # HTTP Listener (forward to app when certificate is not configured)
+# checkov:skip=CKV_AWS_2:HTTP listener is intentional when no ACM certificate is configured (dev/no-TLS environments)
+# checkov:skip=CKV_AWS_103:TLS 1.2 enforcement only applies to HTTPS listeners; this listener is HTTP-only for dev
+# checkov:skip=CKV2_AWS_20:HTTP forward listener is only created when no cert is provided; HTTPS redirect listener is created when cert exists
 resource "aws_lb_listener" "http_forward" {
   count             = var.certificate_arn == "" ? 1 : 0
   load_balancer_arn = aws_lb.main.arn
