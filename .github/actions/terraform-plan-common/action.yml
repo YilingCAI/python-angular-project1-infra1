@@ -33,10 +33,8 @@ runs:
         ENV_DIR="environments/${{ inputs.target_environment }}"
         if [ -f "${ENV_DIR}/terraform.tfvars" ]; then
           echo "var_file_arg=-var-file=terraform.tfvars" >> "$GITHUB_OUTPUT"
-          echo "infracost_plan_flags=--terraform-plan-flags=-var-file=terraform.tfvars" >> "$GITHUB_OUTPUT"
         else
           echo "var_file_arg=" >> "$GITHUB_OUTPUT"
-          echo "infracost_plan_flags=" >> "$GITHUB_OUTPUT"
           echo "terraform.tfvars not found in ${ENV_DIR}; running with defaults and other provided vars."
         fi
 
@@ -44,6 +42,11 @@ runs:
       if: ${{ inputs.speculative_plan == 'true' }}
       shell: bash
       run: |
+        terraform -chdir="environments/${{ inputs.target_environment }}" init \
+          -backend=false \
+          -input=false \
+          -reconfigure
+          
         terraform -chdir="environments/${{ inputs.target_environment }}" plan \
           ${{ steps.vars.outputs.var_file_arg }} \
           -lock=false \
@@ -53,6 +56,10 @@ runs:
         terraform -chdir="environments/${{ inputs.target_environment }}" show \
           -no-color \
           "plan.tfplan" > "environments/${{ inputs.target_environment }}/plan-output.txt"
+
+        terraform -chdir="environments/${{ inputs.target_environment }}" show \
+          -json \
+          "plan.tfplan" > "environments/${{ inputs.target_environment }}/plan.json"
 
     - name: Terraform plan (real)
       if: ${{ inputs.speculative_plan != 'true' }}
@@ -75,8 +82,7 @@ runs:
       shell: bash
       run: |
         infracost breakdown \
-          --path="environments/${{ inputs.target_environment }}" \
-          ${{ steps.vars.outputs.infracost_plan_flags }} \
+          --path="environments/${{ inputs.target_environment }}/plan.json" \
           --format=json \
           --out-file="environments/${{ inputs.target_environment }}/infracost.json"
 
@@ -88,6 +94,7 @@ runs:
         path: |
           environments/${{ inputs.target_environment }}/plan-output.txt
           environments/${{ inputs.target_environment }}/plan.tfplan
+          environments/${{ inputs.target_environment }}/plan.json
           environments/${{ inputs.target_environment }}/tfplan.binary
           environments/${{ inputs.target_environment }}/infracost.json
 
