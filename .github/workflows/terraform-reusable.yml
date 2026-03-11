@@ -1,0 +1,183 @@
+name: Terraform Reusable
+
+on:
+  workflow_call:
+    inputs:
+      target_environment:
+        description: Terraform target environment (dev/staging/prod)
+        required: true
+        type: string
+      github_environment:
+        description: Optional GitHub Environment name override
+        required: false
+        type: string
+        default: ""
+      operation:
+        description: Terraform operation to run (drift/apply)
+        required: true
+        type: string
+      enable_security_checks:
+        description: Run checkov/tflint/trivy checks
+        required: false
+        type: boolean
+        default: false
+      checkov_enforcement:
+        description: Checkov enforcement mode (advisory or blocking)
+        required: false
+        type: string
+        default: advisory
+      fail_on_drift:
+        description: Fail workflow when drift is detected
+        required: false
+        type: boolean
+        default: true
+      apply_use_saved_plan:
+        description: Apply using previously generated saved plan artifact
+        required: false
+        type: boolean
+        default: false
+      saved_plan_artifact_name:
+        description: Artifact name containing tfplan.binary
+        required: false
+        type: string
+        default: ""
+    secrets:
+      JWT_SECRET_KEY:
+        required: true
+      TERRAFORM_STATE_BUCKET:
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+jobs:
+  terraform:
+    name: Terraform ${{ inputs.target_environment }} (${{ inputs.operation }})
+    runs-on: ubuntu-latest
+    concurrency:
+      group: terraform-state-${{ inputs.target_environment }}
+      cancel-in-progress: false
+    environment: ${{ inputs.github_environment != '' && inputs.github_environment || inputs.target_environment }}
+    env:
+      TF_ENV: ${{ inputs.target_environment }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Terraform common setup and checks
+        uses: ./.github/actions/terraform-common
+        with:
+          target_environment: ${{ inputs.target_environment }}
+          operation: ${{ inputs.operation }}
+          aws_region: ${{ vars.AWS_REGION }}
+          terraform_state_bucket: ${{ secrets.TERRAFORM_STATE_BUCKET }}
+          jwt_secret_key: ${{ secrets.JWT_SECRET_KEY }}
+          enable_security_checks: ${{ inputs.enable_security_checks }}
+          checkov_enforcement: ${{ inputs.checkov_enforcement }}
+          aws_oidc_role_arn: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          role_session_name_prefix: gha-terraform
+
+      - name: Detect Terraform var-file
+        if: inputs.operation == 'drift' || inputs.operation == 'apply'
+        id: vars
+        shell: bash
+        run: |
+          if [ -f "environments/${TF_ENV}/terraform.tfvars" ]; then
+            echo "var_file_arg=-var-file=terraform.tfvars" >> "$GITHUB_OUTPUT"
+          else
+            echo "var_file_arg=" >> "$GITHUB_OUTPUT"
+            echo "terraform.tfvars not found in environments/${TF_ENV}; running with defaults and other provided vars."
+
+      - name: Download saved plan artifact
+        if: inputs.operation == 'apply' && inputs.apply_use_saved_plan && inputs.saved_plan_artifact_name != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.saved_plan_artifact_name }}
+          path: environments/${{ inputs.target_environment }}
+
+      - name: Verify saved plan file
+        if: inputs.operation == 'apply' && inputs.apply_use_saved_plan
+        shell: bash
+        run: |
+          [ -f "environments/${TF_ENV}/tfplan.binary" ] || {
+            echo "Saved plan file not found at environments/${TF_ENV}/tfplan.binary" >&2
+            exit 1
+          }
+
+      - name: Terraform drift plan
+        if: inputs.operation == 'drift'
+        id: drift
+        shell: bash
+        run: |
+          set +e
+          terraform -chdir="environments/${TF_ENV}" plan -detailed-exitcode ${{ steps.vars.outputs.var_file_arg }} -lock-timeout=5m -no-color > "environments/${TF_ENV}/plan-output.txt" 2>&1
+          PLAN_EXIT=$?
+          set -e
+
+          if [ "$PLAN_EXIT" -eq 1 ]; then
+            echo "Terraform plan failed"
+            cat "environments/${TF_ENV}/plan-output.txt"
+            exit 1
+          fi
+
+          echo "plan_exit=$PLAN_EXIT" >> "$GITHUB_OUTPUT"
+
+
+      - name: Upload drift plan artifact
+        if: inputs.operation == 'drift'
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-drift-${{ inputs.target_environment }}
+          path: environments/${TF_ENV}/plan-output.txt
+
+      - name: Write drift summary
+        if: inputs.operation == 'drift' && always()
+        shell: bash
+        run: |
+          if [ "${{ steps.drift.outputs.plan_exit }}" = "0" ]; then
+            echo "### Nightly Drift Check - ${TF_ENV}" >> "$GITHUB_STEP_SUMMARY"
+            echo "No drift detected." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "${{ steps.drift.outputs.plan_exit }}" = "2" ]; then
+            echo "### Nightly Drift Check - ${TF_ENV}" >> "$GITHUB_STEP_SUMMARY"
+            echo "Drift detected. Review artifact: terraform-drift-${TF_ENV}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Nightly Drift Check - ${TF_ENV}" >> "$GITHUB_STEP_SUMMARY"
+            echo "Plan did not complete normally. Check job logs." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Fail on detected drift
+        if: inputs.operation == 'drift' && inputs.fail_on_drift && steps.drift.outputs.plan_exit == '2'
+        run: |
+          echo "Drift detected for ${TF_ENV}"
+          exit 1
+
+      - name: Terraform apply
+        if: inputs.operation == 'apply'
+        run: |
+          if [ "${{ inputs.apply_use_saved_plan }}" = "true" ]; then
+            terraform -chdir="environments/${TF_ENV}" apply \
+              -lock-timeout=5m \
+              -auto-approve \
+              -input=false \
+              "tfplan.binary"
+          else
+            terraform -chdir="environments/${TF_ENV}" apply \
+              ${{ steps.vars.outputs.var_file_arg }} \
+              -lock-timeout=5m \
+              -auto-approve \
+              -input=false
+          fi
+
+      - name: Workflow summary
+        if: always()
+        shell: bash
+        run: |
+          echo "## Terraform Workflow Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Environment: ${TF_ENV}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Operation: ${{ inputs.operation }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Status: ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ inputs.operation }}" = "drift" ] && [ "${{ steps.drift.outputs.plan_exit }}" = "2" ]; then
+            echo "- Drift: detected" >> "$GITHUB_STEP_SUMMARY"
+          fi

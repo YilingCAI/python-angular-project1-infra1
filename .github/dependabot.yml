@@ -2,16 +2,115 @@ version: 2
 
 updates:
   - package-ecosystem: "terraform"
-    directory: "/"
+    directory: "/bootstrap"
     schedule:
       interval: "weekly"
       day: "monday"
       time: "03:00"
+      timezone: "UTC"
     open-pull-requests-limit: 5
     labels:
       - "dependencies"
       - "terraform"
       - "infra"
+    reviewers:
+      - "YilingCAI"
+    assignees:
+      - "YilingCAI"
+    groups:
+      terraform-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    pull-request-branch-name:
+      separator: "/"
+    commit-message:
+      prefix: "build(terraform):"
+      include: "scope"
+
+  - package-ecosystem: "terraform"
+    directory: "/environments/dev"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:05"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "terraform"
+      - "infra"
+    reviewers:
+      - "YilingCAI"
+    assignees:
+      - "YilingCAI"
+    groups:
+      terraform-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    pull-request-branch-name:
+      separator: "/"
+    commit-message:
+      prefix: "build(terraform):"
+      include: "scope"
+
+  - package-ecosystem: "terraform"
+    directory: "/environments/staging"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:10"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "terraform"
+      - "infra"
+    reviewers:
+      - "YilingCAI"
+    assignees:
+      - "YilingCAI"
+    groups:
+      terraform-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    pull-request-branch-name:
+      separator: "/"
+    commit-message:
+      prefix: "build(terraform):"
+      include: "scope"
+
+  - package-ecosystem: "terraform"
+    directory: "/environments/prod"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:15"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "terraform"
+      - "infra"
+    reviewers:
+      - "YilingCAI"
+    assignees:
+      - "YilingCAI"
+    groups:
+      terraform-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
     pull-request-branch-name:
       separator: "/"
     commit-message:
@@ -24,11 +123,23 @@ updates:
       interval: "weekly"
       day: "wednesday"
       time: "03:00"
+      timezone: "UTC"
     open-pull-requests-limit: 5
     labels:
       - "dependencies"
       - "ci"
       - "infra"
+    reviewers:
+      - "YilingCAI"
+    assignees:
+      - "YilingCAI"
+    groups:
+      github-actions-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
     pull-request-branch-name:
       separator: "/"
     commit-message:

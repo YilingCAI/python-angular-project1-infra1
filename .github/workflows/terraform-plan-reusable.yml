@@ -1,0 +1,91 @@
+name: Terraform Plan Reusable
+
+on:
+  workflow_call:
+    inputs:
+      target_environment:
+        description: Terraform target environment for plan checks
+        required: true
+        type: string
+      github_environment:
+        description: Optional GitHub Environment name override
+        required: false
+        type: string
+        default: ""
+      enable_security_checks:
+        description: Run checkov/tflint/trivy checks
+        required: false
+        type: boolean
+        default: true
+      checkov_enforcement:
+        description: Checkov enforcement mode (advisory or blocking)
+        required: false
+        type: string
+        default: advisory
+      terraform_init_backend:
+        description: Initialize Terraform with backend enabled (true) or disabled (false)
+        required: false
+        type: boolean
+        default: true
+      enable_pr_comment:
+        description: Post plan comment to PR
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      JWT_SECRET_KEY:
+        required: true
+      TERRAFORM_STATE_BUCKET:
+        required: false
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+jobs:
+  terraform-plan-real:
+    name: Terraform Plan ${{ inputs.target_environment }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: terraform-state-${{ inputs.target_environment }}
+      cancel-in-progress: false
+    environment: ${{ inputs.github_environment != '' && inputs.github_environment || inputs.target_environment }}
+    env:
+      TF_ENV: ${{ inputs.target_environment }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Terraform common setup and checks
+        uses: ./.github/actions/terraform-common
+        with:
+          target_environment: ${{ inputs.target_environment }}
+          operation: plan
+          aws_region: ${{ vars.AWS_REGION }}
+          terraform_state_bucket: ${{ secrets.TERRAFORM_STATE_BUCKET }}
+          terraform_plan_speculative: ${{ !inputs.terraform_init_backend }}
+          aws_auth_required: true
+          jwt_secret_key: ${{ secrets.JWT_SECRET_KEY }}
+          enable_security_checks: ${{ inputs.enable_security_checks }}
+          checkov_enforcement: ${{ inputs.checkov_enforcement }}
+          aws_oidc_role_arn: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          role_session_name_prefix: gha-terraform-plan
+
+      - name: Terraform shared plan steps
+        uses: ./.github/actions/terraform-plan-common
+        with:
+          target_environment: ${{ inputs.target_environment }}
+          speculative_plan: false
+          enable_infracost: false
+          infracost_api_key: ""
+          enable_pr_comment: ${{ inputs.enable_pr_comment }}
+
+      - name: Workflow summary
+        if: always()
+        shell: bash
+        run: |
+          echo "## Terraform Workflow Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Environment: ${TF_ENV}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Operation: plan" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Status: ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"

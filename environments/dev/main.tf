@@ -23,13 +23,15 @@ terraform {
   #     -backend-config="bucket=$TERRAFORM_STATE_BUCKET" \
   #     -backend-config="key=<environment>/terraform.tfstate" \
   #     -backend-config="region=$AWS_REGION" \
-  #     -backend-config="dynamodb_table=$TERRAFORM_LOCK_TABLE"
+  #     -backend-config="use_lockfile=true"
   #
   # Local development: run `terraform init -backend=false` to skip remote state.
   backend "s3" {
     encrypt = true
   }
 }
+
+data "aws_caller_identity" "current" {}
 
 locals {
   frontend_ecr_repository_url = var.frontend_ecr_repository_url != "" ? var.frontend_ecr_repository_url : replace(var.ecr_repository_url, "/backend", "/frontend")
@@ -38,7 +40,7 @@ locals {
 
 # Networking Module
 module "network" {
-  source = "./modules/network"
+  source = "../../modules/vpc"
 
   project_name          = var.project_name
   vpc_cidr              = var.vpc_cidr
@@ -52,7 +54,7 @@ module "network" {
 
 # RDS Module
 module "rds" {
-  source = "./modules/rds"
+  source = "../../modules/rds"
 
   project_name             = var.project_name
   database_subnet_ids      = module.network.database_subnet_ids
@@ -71,7 +73,7 @@ module "rds" {
 
 # ALB Module
 module "alb" {
-  source = "./modules/alb"
+  source = "../../modules/alb"
 
   project_name          = var.project_name
   vpc_id                = module.network.vpc_id
@@ -91,15 +93,6 @@ resource "aws_secretsmanager_secret" "jwt_secret" {
 
   tags = {
     Name = "${var.project_name}-jwt-secret"
-  }
-}
-
-# Enable automatic rotation for JWT secret
-resource "aws_secretsmanager_secret_rotation" "jwt_secret" {
-  count     = var.enable_secret_rotation ? 1 : 0
-  secret_id = aws_secretsmanager_secret.jwt_secret.id
-  rotation_rules {
-    automatically_after_days = 30
   }
 }
 
@@ -178,7 +171,7 @@ resource "aws_kms_key_policy" "secrets" {
 
 # ECS Module
 module "ecs" {
-  source = "./modules/ecs"
+  source = "../../modules/ecs-service"
 
   project_name              = var.project_name
   aws_region                = var.aws_region
@@ -208,7 +201,7 @@ module "ecs" {
 }
 
 module "ecs_frontend" {
-  source = "./modules/ecs_frontend"
+  source = "../../modules/iam"
 
   project_name          = var.project_name
   aws_region            = var.aws_region

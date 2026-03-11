@@ -4,23 +4,56 @@ data "aws_partition" "current" {}
 
 locals {
   account_id         = data.aws_caller_identity.current.account_id
-  effective_bucket   = var.state_bucket_name != "" ? var.state_bucket_name : "terraform-state-${local.account_id}"
   backend_repo_name  = "${var.project_name}/backend"
   frontend_repo_name = "${var.project_name}/frontend"
-  oidc_subjects      = length(var.github_oidc_subjects) > 0 ? var.github_oidc_subjects : ["repo:${var.github_org}/${var.github_repo}:ref:refs/heads/main"]
+  project_slug       = replace(lower(var.project_name), "_", "-")
+  state_bucket_names = {
+    for env in var.environments :
+    env => lookup(var.state_bucket_names, env, "") != "" ? lookup(var.state_bucket_names, env, "") : "${local.project_slug}-tfstate-${env}-${local.account_id}"
+  }
+
+  ecr_actions = ["ecr:*"]
+
+  infra_actions = [
+    "ecs:*",
+    "ec2:*",
+    "elasticloadbalancing:*",
+    "logs:*",
+    "cloudwatch:*",
+    "secretsmanager:*",
+    "kms:*",
+    "rds:*"
+  ]
+
+  state_bucket_actions = [
+    "s3:DeleteObject",
+    "s3:GetBucketEncryption",
+    "s3:GetBucketLocation",
+    "s3:GetBucketVersioning",
+    "s3:GetObject",
+    "s3:ListBucket",
+    "s3:PutBucketEncryption",
+    "s3:PutBucketVersioning",
+    "s3:PutObject"
+  ]
+
+  github_oidc_provider_arn = aws_iam_openid_connect_provider.github.arn
 }
 
 resource "aws_s3_bucket" "terraform_state" {
-  bucket = local.effective_bucket
+  for_each = local.state_bucket_names
+  bucket   = each.value
 
   tags = {
-    Name    = local.effective_bucket
-    Purpose = "terraform-state"
+    Name        = each.value
+    Environment = each.key
+    Purpose     = "terraform-state"
   }
 }
 
 resource "aws_s3_bucket_versioning" "terraform_state" {
-  bucket = aws_s3_bucket.terraform_state.id
+  for_each = aws_s3_bucket.terraform_state
+  bucket   = each.value.id
 
   versioning_configuration {
     status = "Enabled"
@@ -28,7 +61,8 @@ resource "aws_s3_bucket_versioning" "terraform_state" {
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "terraform_state" {
-  bucket = aws_s3_bucket.terraform_state.id
+  for_each = aws_s3_bucket.terraform_state
+  bucket   = each.value.id
 
   rule {
     apply_server_side_encryption_by_default {
@@ -38,29 +72,13 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "terraform_state" 
 }
 
 resource "aws_s3_bucket_public_access_block" "terraform_state" {
-  bucket = aws_s3_bucket.terraform_state.id
+  for_each = aws_s3_bucket.terraform_state
+  bucket   = each.value.id
 
   block_public_acls       = true
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
-}
-
-resource "aws_dynamodb_table" "terraform_lock" {
-  count        = var.create_lock_table ? 1 : 0
-  name         = var.lock_table_name
-  billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "LockID"
-
-  attribute {
-    name = "LockID"
-    type = "S"
-  }
-
-  tags = {
-    Name    = var.lock_table_name
-    Purpose = "terraform-lock-legacy"
-  }
 }
 
 resource "aws_ecr_repository" "backend" {
@@ -103,7 +121,7 @@ data "aws_iam_policy_document" "github_actions_trust" {
 
     principals {
       type        = "Federated"
-      identifiers = [aws_iam_openid_connect_provider.github.arn]
+      identifiers = [local.github_oidc_provider_arn]
     }
 
     condition {
@@ -115,21 +133,28 @@ data "aws_iam_policy_document" "github_actions_trust" {
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = local.oidc_subjects
+      values   = var.github_oidc_subjects
     }
   }
 }
 
 resource "aws_iam_role" "github_actions" {
-  name               = var.github_actions_role_name
-  assume_role_policy = data.aws_iam_policy_document.github_actions_trust.json
+  name                 = var.github_actions_role_name
+  max_session_duration = 3600
+  assume_role_policy   = data.aws_iam_policy_document.github_actions_trust.json
+
+  tags = {
+    Name    = var.github_actions_role_name
+    Scope   = "shared"
+    Purpose = "cicd"
+  }
 }
 
 data "aws_iam_policy_document" "github_actions_permissions" {
   statement {
     sid     = "ECR"
     effect  = "Allow"
-    actions = ["ecr:*"]
+    actions = local.ecr_actions
     resources = [
       aws_ecr_repository.backend.arn,
       aws_ecr_repository.frontend.arn,
@@ -146,36 +171,20 @@ data "aws_iam_policy_document" "github_actions_permissions" {
   }
 
   statement {
-    sid    = "ECSAndInfraDeploy"
-    effect = "Allow"
-    actions = [
-      "ecs:*",
-      "ec2:*",
-      "elasticloadbalancing:*",
-      "logs:*",
-      "cloudwatch:*",
-      "secretsmanager:*",
-      "kms:*",
-      "rds:*"
-    ]
+    sid       = "ECSAndInfraDeploy"
+    effect    = "Allow"
+    actions   = local.infra_actions
     resources = ["*"]
   }
 
   statement {
     sid     = "StateBucket"
     effect  = "Allow"
-    actions = ["s3:*"]
-    resources = [
-      aws_s3_bucket.terraform_state.arn,
-      "${aws_s3_bucket.terraform_state.arn}/*"
-    ]
-  }
-
-  statement {
-    sid       = "LegacyLockTable"
-    effect    = "Allow"
-    actions   = ["dynamodb:*"]
-    resources = var.create_lock_table ? [aws_dynamodb_table.terraform_lock[0].arn] : ["*"]
+    actions = local.state_bucket_actions
+    resources = concat(
+      [for bucket in values(aws_s3_bucket.terraform_state) : bucket.arn],
+      [for bucket in values(aws_s3_bucket.terraform_state) : "${bucket.arn}/*"]
+    )
   }
 
   statement {

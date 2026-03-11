@@ -26,15 +26,6 @@ resource "aws_secretsmanager_secret" "db_password" {
   }
 }
 
-# Enable automatic rotation for DB password (CKV2_AWS_57)
-resource "aws_secretsmanager_secret_rotation" "db_password" {
-  count     = var.enable_secret_rotation ? 1 : 0
-  secret_id = aws_secretsmanager_secret.db_password.id
-  rotation_rules {
-    automatically_after_days = 30
-  }
-}
-
 resource "aws_secretsmanager_secret_version" "db_password" {
   secret_id = aws_secretsmanager_secret.db_password.id
   secret_string = jsonencode({

@@ -10,50 +10,43 @@ variable "project_name" {
   default     = "mypythonproject1"
 }
 
-variable "github_org" {
-  description = "GitHub organization/user name"
+variable "expected_account_id" {
+  description = "Expected AWS account ID for bootstrap operations. Leave empty to disable Terraform-side account check."
   type        = string
+  default     = ""
+
+  validation {
+    condition     = var.expected_account_id == "" || can(regex("^[0-9]{12}$", var.expected_account_id))
+    error_message = "expected_account_id must be empty or a 12-digit AWS account ID."
+  }
 }
 
-variable "github_repo" {
-  description = "GitHub repository name"
-  type        = string
+variable "environments" {
+  description = "Environment names to bootstrap in one run"
+  type        = set(string)
+  default     = ["dev", "staging", "prod"]
 }
 
 variable "github_actions_role_name" {
-  description = "IAM role name assumed by GitHub Actions via OIDC"
+  description = "Shared IAM role name assumed by GitHub Actions via OIDC"
   type        = string
   default     = "GitHubActionsRole"
 }
 
-variable "github_environments" {
-  description = "Deprecated: previously used for environment-based OIDC trust"
-  type        = list(string)
-  default     = ["staging", "production"]
-}
-
 variable "github_oidc_subjects" {
-  description = "Allowed OIDC subject claims. Default restricts to repo main branch ref. Example: repo:ORG/REPO:ref:refs/heads/main"
+  description = "Allowed OIDC subject claims for GitHub OIDC trust. Example: repo:ORG/REPO:ref:refs/heads/main"
   type        = list(string)
-  default     = []
+
+  validation {
+    condition     = length(var.github_oidc_subjects) > 0
+    error_message = "github_oidc_subjects must include at least one allowed OIDC subject claim."
+  }
 }
 
-variable "state_bucket_name" {
-  description = "Override for Terraform state bucket name; empty uses terraform-state-<account-id>"
-  type        = string
-  default     = ""
-}
-
-variable "lock_table_name" {
-  description = "DynamoDB lock table name (legacy compatibility)"
-  type        = string
-  default     = "terraform-locks"
-}
-
-variable "create_lock_table" {
-  description = "Create DynamoDB lock table for backward compatibility"
-  type        = bool
-  default     = true
+variable "state_bucket_names" {
+  description = "Optional per-environment state bucket name overrides"
+  type        = map(string)
+  default     = {}
 }
 
 variable "oidc_thumbprints" {
