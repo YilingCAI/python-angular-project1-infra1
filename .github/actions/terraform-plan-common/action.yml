@@ -42,11 +42,6 @@ runs:
       if: ${{ inputs.speculative_plan == 'true' }}
       shell: bash
       run: |
-        terraform -chdir="environments/${{ inputs.target_environment }}" init \
-          -backend=false \
-          -input=false \
-          -reconfigure
-          
         terraform -chdir="environments/${{ inputs.target_environment }}" plan \
           ${{ steps.vars.outputs.var_file_arg }} \
           -lock=false \

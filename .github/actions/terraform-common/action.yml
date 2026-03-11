@@ -85,12 +85,20 @@ runs:
         restore-keys: |
           ${{ runner.os }}-terraform-workdir-${{ inputs.target_environment }}-
 
-    - name: Remove stale backend metadata for backend-disabled mode
+    - name: Prepare speculative backend override
       if: ${{ inputs.terraform_plan_speculative == 'true' }}
       shell: bash
       run: |
-        rm -f "environments/${{ inputs.target_environment }}/backend.hcl"
-        rm -rf "environments/${{ inputs.target_environment }}/.terraform/"
+        ENV_DIR="environments/${{ inputs.target_environment }}"
+        rm -f "${ENV_DIR}/backend.hcl"
+        rm -rf "${ENV_DIR}/.terraform/"
+        cat > "${ENV_DIR}/_backend_override.tf" <<'EOF'
+        terraform {
+          backend "local" {
+            path = "/tmp/speculative.tfstate"
+          }
+        }
+        EOF
         
     - name: Resolve AWS role ARN
       if: ${{ inputs.aws_auth_required == 'true' }}
@@ -192,12 +200,11 @@ runs:
           -reconfigure \
           -input=false
 
-    - name: Terraform init (backend disabled)
+    - name: Terraform init (speculative – local backend override)
       if: ${{ inputs.terraform_plan_speculative == 'true' }}
       shell: bash
       run: |
         terraform -chdir="environments/${{ inputs.target_environment }}" init \
-          -backend=false \
           -reconfigure \
           -input=false
 
