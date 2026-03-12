@@ -67,7 +67,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Terraform common setup and checks
-        uses: ./.github/actions/terraform-common
+        uses: ./.github/actions/terraform-setup-common
         with:
           target_environment: ${{ inputs.target_environment }}
           operation: ${{ inputs.operation }}
