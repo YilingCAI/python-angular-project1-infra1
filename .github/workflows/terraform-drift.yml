@@ -1,0 +1,53 @@
+name: Terraform Drift
+
+on:
+  schedule:
+    - cron: '30 2 * * *'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        required: true
+        type: choice
+        options: [dev, staging, prod, all]
+        default: all
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+concurrency:
+  group: terraform-drift-${{ github.event_name }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  drift-dev:
+    if: github.event_name == 'schedule' || inputs.environment == 'dev' || inputs.environment == 'all'
+    uses: ./.github/workflows/terraform-reusable.yml
+    with:
+      target_environment: dev
+      github_environment: dev
+      operation: drift
+      fail_on_drift: true
+    secrets: inherit
+
+  drift-staging:
+    if: github.event_name == 'schedule' || inputs.environment == 'staging' || inputs.environment == 'all'
+    uses: ./.github/workflows/terraform-reusable.yml
+    with:
+      target_environment: staging
+      github_environment: staging
+      operation: drift
+      fail_on_drift: true
+    secrets: inherit
+
+  drift-prod:
+    if: github.event_name == 'schedule' || inputs.environment == 'prod' || inputs.environment == 'all'
+    uses: ./.github/workflows/terraform-reusable.yml
+    with:
+      target_environment: prod
+      github_environment: prod
+      operation: drift
+      fail_on_drift: true
+    secrets: inherit

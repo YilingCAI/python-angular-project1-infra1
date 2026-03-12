@@ -1,8 +1,6 @@
-name: Terraform Infra
+name: Terraform Plan
 
 on:
-  schedule:
-    - cron: '30 2 * * *'
   pull_request:
     branches: [main]
     paths:
@@ -28,7 +26,7 @@ on:
         description: Terraform action
         required: true
         type: choice
-        options: [plan, apply]
+        options: [plan]
 
 permissions:
   contents: read
@@ -36,39 +34,11 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: terraform-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  group: terraform-plan-${{ inputs.environment }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  drift-dev:
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.environment == 'dev' && inputs.action == 'drift')
-    uses: ./.github/workflows/terraform-reusable.yml
-    with:
-      target_environment: dev
-      github_environment: dev
-      operation: drift
-      fail_on_drift: true
-    secrets: inherit
-
-  drift-staging:
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging' && inputs.action == 'drift')
-    uses: ./.github/workflows/terraform-reusable.yml
-    with:
-      target_environment: staging
-      github_environment: staging
-      operation: drift
-      fail_on_drift: true
-    secrets: inherit
-
-  drift-prod:
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.environment == 'prod' && inputs.action == 'drift')
-    uses: ./.github/workflows/terraform-reusable.yml
-    with:
-      target_environment: prod
-      github_environment: prod
-      operation: drift
-      fail_on_drift: true
-    secrets: inherit
+  # ─── Speculative plans on pull requests (no backend state writes) ─────────
 
   plan-dev:
     if: github.event_name == 'pull_request' && github.base_ref == 'main'
@@ -105,6 +75,8 @@ jobs:
       enable_infracost: true
     secrets: inherit
 
+  # ─── Real plans on push to main (saves plan artifacts for apply) ──────────
+
   plan-dev-main:
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'dev' && inputs.action == 'plan')
     uses: ./.github/workflows/terraform-plan-reusable.yml
@@ -138,43 +110,4 @@ jobs:
       enable_security_checks: true
       checkov_enforcement: advisory
       enable_pr_comment: false
-    secrets: inherit
-
-  apply-dev:
-    needs: [plan-prod-main]
-    if: always() && ((github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.plan-prod-main.result == 'success') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'dev' && inputs.action == 'apply'))
-    uses: ./.github/workflows/terraform-reusable.yml
-    with:
-      target_environment: dev
-      github_environment: dev
-      operation: apply
-      checkov_enforcement: advisory
-      apply_use_saved_plan: ${{ github.event_name != 'workflow_dispatch' }}
-      saved_plan_artifact_name: terraform-plan-dev
-    secrets: inherit
-
-  apply-staging:
-    needs: [apply-dev]
-    if: always() && ((github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.apply-dev.result == 'success') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging' && inputs.action == 'apply'))
-    uses: ./.github/workflows/terraform-reusable.yml
-    with:
-      target_environment: staging
-      github_environment: staging
-      operation: apply
-      checkov_enforcement: advisory
-      apply_use_saved_plan: ${{ github.event_name != 'workflow_dispatch' }}
-      saved_plan_artifact_name: terraform-plan-staging
-    secrets: inherit
-
-  apply-prod:
-    needs: [apply-staging]
-    if: always() && ((github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.apply-staging.result == 'success') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'prod' && inputs.action == 'apply'))
-    uses: ./.github/workflows/terraform-reusable.yml
-    with:
-      target_environment: prod
-      github_environment: prod
-      operation: apply
-      checkov_enforcement: advisory
-      apply_use_saved_plan: ${{ github.event_name != 'workflow_dispatch' }}
-      saved_plan_artifact_name: terraform-plan-prod
     secrets: inherit

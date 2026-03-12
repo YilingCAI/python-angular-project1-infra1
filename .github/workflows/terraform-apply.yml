@@ -1,0 +1,92 @@
+name: Terraform Apply
+
+on:
+  # Triggered automatically after "Terraform Plan" completes on a push to main.
+  # Only fires when the plan workflow ran due to a push (not a scheduled drift
+  # check or a manual workflow_dispatch plan run).
+  workflow_run:
+    workflows: ["Terraform Plan"]
+    types: [completed]
+    branches: [main]
+
+  # Allows manual one-environment applies without a preceding plan workflow run.
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        required: true
+        type: choice
+        options: [dev, staging, prod]
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+  actions: read  # Required to download artifacts from the triggering plan run
+
+concurrency:
+  group: terraform-apply-${{ inputs.environment }}-${{ github.event.workflow_run.head_branch || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ─── Apply dev ────────────────────────────────────────────────────────────
+  apply-dev:
+    # workflow_run: only when triggered by a push event (not schedule or manual plan)
+    # workflow_dispatch: when the user explicitly targets dev
+    if: >-
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'workflow_dispatch' && inputs.environment == 'dev')
+    uses: ./.github/workflows/terraform-reusable.yml
+    with:
+      target_environment: dev
+      github_environment: dev
+      operation: apply
+      checkov_enforcement: advisory
+      apply_use_saved_plan: ${{ github.event_name == 'workflow_run' }}
+      saved_plan_artifact_name: terraform-plan-dev
+      plan_run_id: ${{ github.event.workflow_run.id }}
+    secrets: inherit
+
+  # ─── Apply staging ────────────────────────────────────────────────────────
+  apply-staging:
+    needs: [apply-dev]
+    if: >-
+      always() &&
+      ((github.event_name == 'workflow_run' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        needs.apply-dev.result == 'success') ||
+       (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging'))
+    uses: ./.github/workflows/terraform-reusable.yml
+    with:
+      target_environment: staging
+      github_environment: staging
+      operation: apply
+      checkov_enforcement: advisory
+      apply_use_saved_plan: ${{ github.event_name == 'workflow_run' }}
+      saved_plan_artifact_name: terraform-plan-staging
+      plan_run_id: ${{ github.event.workflow_run.id }}
+    secrets: inherit
+
+  # ─── Apply prod ───────────────────────────────────────────────────────────
+  apply-prod:
+    needs: [apply-staging]
+    if: >-
+      always() &&
+      ((github.event_name == 'workflow_run' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        needs.apply-staging.result == 'success') ||
+       (github.event_name == 'workflow_dispatch' && inputs.environment == 'prod'))
+    uses: ./.github/workflows/terraform-reusable.yml
+    with:
+      target_environment: prod
+      github_environment: prod
+      operation: apply
+      checkov_enforcement: advisory
+      apply_use_saved_plan: ${{ github.event_name == 'workflow_run' }}
+      saved_plan_artifact_name: terraform-plan-prod
+      plan_run_id: ${{ github.event.workflow_run.id }}
+    secrets: inherit
