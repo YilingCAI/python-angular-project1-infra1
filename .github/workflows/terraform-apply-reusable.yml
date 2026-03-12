@@ -41,6 +41,14 @@ on:
         required: false
         type: string
         default: ""
+      plan_run_id:
+        description: |  
+          Run ID of the workflow that generated the saved plan artifact.
+          Required when downloading artifacts across workflow runs (e.g. workflow_run trigger).
+          Leave empty to download from the current workflow run.
+        required: false
+        type: string
+        default: ""
     secrets:
       JWT_SECRET_KEY:
         required: true
@@ -51,6 +59,7 @@ permissions:
   contents: read
   id-token: write
   pull-requests: write
+  actions: read
 
 jobs:
   terraform:
@@ -91,8 +100,17 @@ jobs:
             echo "terraform.tfvars not found in environments/${TF_ENV}; running with defaults and other provided vars."
           fi
 
-      - name: Download saved plan artifact
-        if: inputs.operation == 'apply' && inputs.apply_use_saved_plan && inputs.saved_plan_artifact_name != ''
+      - name: Download saved plan artifact (cross-run)
+        if: inputs.operation == 'apply' && inputs.apply_use_saved_plan && inputs.saved_plan_artifact_name != '' && inputs.plan_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.saved_plan_artifact_name }}
+          path: environments/${{ inputs.target_environment }}
+          run-id: ${{ inputs.plan_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download saved plan artifact (current run)
+        if: inputs.operation == 'apply' && inputs.apply_use_saved_plan && inputs.saved_plan_artifact_name != '' && inputs.plan_run_id == ''
         uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.saved_plan_artifact_name }}

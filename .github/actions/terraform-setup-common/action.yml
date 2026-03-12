@@ -76,15 +76,6 @@ runs:
           ${{ runner.os }}-terraform-${{ inputs.target_environment }}-
           ${{ runner.os }}-terraform-
 
-    - name: Restore Terraform working directory cache
-      if: ${{ inputs.terraform_plan_speculative != 'true' }}
-      uses: actions/cache@v4
-      with:
-        path: environments/${{ inputs.target_environment }}/.terraform
-        key: ${{ runner.os }}-terraform-workdir-${{ inputs.target_environment }}-${{ hashFiles(format('environments/{0}/.terraform.lock.hcl', inputs.target_environment)) }}
-        restore-keys: |
-          ${{ runner.os }}-terraform-workdir-${{ inputs.target_environment }}-
-
     - name: Prepare speculative backend override
       if: ${{ inputs.terraform_plan_speculative == 'true' }}
       shell: bash
