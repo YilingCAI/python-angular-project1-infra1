@@ -41,7 +41,7 @@ concurrency:
 
 jobs:
   drift-dev:
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.environment == 'dev' && inputs.action == 'plan')
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.environment == 'dev' && inputs.action == 'drift')
     uses: ./.github/workflows/terraform-reusable.yml
     with:
       target_environment: dev
@@ -51,7 +51,7 @@ jobs:
     secrets: inherit
 
   drift-staging:
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging' && inputs.action == 'plan')
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging' && inputs.action == 'drift')
     uses: ./.github/workflows/terraform-reusable.yml
     with:
       target_environment: staging
@@ -61,7 +61,7 @@ jobs:
     secrets: inherit
 
   drift-prod:
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.environment == 'prod' && inputs.action == 'plan')
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.environment == 'prod' && inputs.action == 'drift')
     uses: ./.github/workflows/terraform-reusable.yml
     with:
       target_environment: prod
