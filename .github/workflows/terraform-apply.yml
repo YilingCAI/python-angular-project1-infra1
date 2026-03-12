@@ -29,8 +29,59 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # ─── Fetch plan artifacts from the triggering plan run ────────────────────
+  # actions: read (on this caller workflow) is used here to download artifacts
+  # from the triggering plan run, then re-upload them to this run so that
+  # the apply reusable workflows can download them without needing actions: read.
+  prepare-artifacts:
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download dev plan artifact from plan run
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan-dev
+          path: /tmp/artifacts/dev
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Download staging plan artifact from plan run
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan-staging
+          path: /tmp/artifacts/staging
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Download prod plan artifact from plan run
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan-prod
+          path: /tmp/artifacts/prod
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Re-upload dev plan artifact to this run
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-dev
+          path: /tmp/artifacts/dev
+
+      - name: Re-upload staging plan artifact to this run
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-staging
+          path: /tmp/artifacts/staging
+
+      - name: Re-upload prod plan artifact to this run
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-prod
+          path: /tmp/artifacts/prod
+
   # ─── Apply dev ────────────────────────────────────────────────────────────
   apply-dev:
+    needs: [prepare-artifacts]
     # workflow_run: only when triggered by a push event (not schedule or manual plan)
     # workflow_dispatch: when the user explicitly targets dev
     if: >-
@@ -38,7 +89,7 @@ jobs:
        github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.conclusion == 'success') ||
       (github.event_name == 'workflow_dispatch' && inputs.environment == 'dev')
-    uses: ./.github/workflows/terraform-reusable.yml
+    uses: ./.github/workflows/terraform-apply-reusable.yml
     with:
       target_environment: dev
       github_environment: dev
@@ -46,7 +97,6 @@ jobs:
       checkov_enforcement: advisory
       apply_use_saved_plan: ${{ github.event_name == 'workflow_run' }}
       saved_plan_artifact_name: terraform-plan-dev
-      plan_run_id: ${{ github.event.workflow_run.id }}
     secrets: inherit
 
   # ─── Apply staging ────────────────────────────────────────────────────────
@@ -59,7 +109,7 @@ jobs:
         github.event.workflow_run.conclusion == 'success' &&
         needs.apply-dev.result == 'success') ||
        (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging'))
-    uses: ./.github/workflows/terraform-reusable.yml
+    uses: ./.github/workflows/terraform-apply-reusable.yml
     with:
       target_environment: staging
       github_environment: staging
@@ -67,7 +117,6 @@ jobs:
       checkov_enforcement: advisory
       apply_use_saved_plan: ${{ github.event_name == 'workflow_run' }}
       saved_plan_artifact_name: terraform-plan-staging
-      plan_run_id: ${{ github.event.workflow_run.id }}
     secrets: inherit
 
   # ─── Apply prod ───────────────────────────────────────────────────────────
@@ -80,7 +129,7 @@ jobs:
         github.event.workflow_run.conclusion == 'success' &&
         needs.apply-staging.result == 'success') ||
        (github.event_name == 'workflow_dispatch' && inputs.environment == 'prod'))
-    uses: ./.github/workflows/terraform-reusable.yml
+    uses: ./.github/workflows/terraform-apply-reusable.yml
     with:
       target_environment: prod
       github_environment: prod
@@ -88,5 +137,4 @@ jobs:
       checkov_enforcement: advisory
       apply_use_saved_plan: ${{ github.event_name == 'workflow_run' }}
       saved_plan_artifact_name: terraform-plan-prod
-      plan_run_id: ${{ github.event.workflow_run.id }}
     secrets: inherit
