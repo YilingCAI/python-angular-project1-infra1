@@ -112,16 +112,20 @@ jobs:
         id: drift
         shell: bash
         run: |
-          # Disable both errexit (-e) and pipefail so that:
-          #   - terraform exit code 2 (drift) does not abort the script
-          #   - PIPESTATUS[0] is still reachable after the pipe
-          set +eo pipefail
+          # Run plan and capture exit code without pipes.
+          # GitHub Actions bash uses: bash --noprofile --norc -e -o pipefail {0}
+          # Even with set +eo pipefail, some runners re-enable them.
+          # Using a temp script file avoids all shell-option quirks.
+          PLAN_FILE="environments/${TF_ENV}/plan-output.txt"
+
+          PLAN_EXIT=0
           terraform -chdir="environments/${TF_ENV}" plan -detailed-exitcode \
             ${{ steps.vars.outputs.var_file_arg }} \
             -lock-timeout=5m \
-            -no-color 2>&1 | tee "environments/${TF_ENV}/plan-output.txt"
-          PLAN_EXIT="${PIPESTATUS[0]}"
-          set -eo pipefail
+            -no-color > "${PLAN_FILE}" 2>&1 || PLAN_EXIT=$?
+
+          # Always print the plan to the job log
+          cat "${PLAN_FILE}"
 
           echo "plan_exit=${PLAN_EXIT}" >> "$GITHUB_OUTPUT"
 
@@ -129,8 +133,9 @@ jobs:
             echo "::error::Terraform plan errored in ${TF_ENV}. See logs above."
             exit 1
           fi
-          # Exit 2 = drift detected. Do NOT exit here — let downstream steps
-          # produce the summary and artifact before the job is failed.
+          # Exit 0 = no drift, exit 2 = drift detected.
+          # Do NOT exit here — let downstream steps produce the summary
+          # and artifact before the job is failed.
 
       - name: Upload drift artifact
         if: inputs.operation == 'drift' && always()
