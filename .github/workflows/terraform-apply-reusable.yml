@@ -113,17 +113,25 @@ jobs:
         shell: bash
         run: |
           set +e
-          terraform -chdir="environments/${TF_ENV}" plan -detailed-exitcode ${{ steps.vars.outputs.var_file_arg }} -lock-timeout=5m -no-color > "environments/${TF_ENV}/plan-output.txt" 2>&1
-          PLAN_EXIT=$?
+          terraform -chdir="environments/${TF_ENV}" plan -detailed-exitcode \
+            ${{ steps.vars.outputs.var_file_arg }} \
+            -lock-timeout=5m \
+            -no-color 2>&1 | tee "environments/${TF_ENV}/plan-output.txt"
+          # PIPESTATUS[0] captures terraform's exit code, not tee's
+          PLAN_EXIT="${PIPESTATUS[0]}"
           set -e
 
           if [ "$PLAN_EXIT" -eq 1 ]; then
-            echo "Terraform plan failed"
-            cat "environments/${TF_ENV}/plan-output.txt"
+            echo "::error::Terraform plan failed in ${TF_ENV}"
             exit 1
           fi
 
+          if [ "$PLAN_EXIT" -eq 2 ]; then
+            echo "::warning::Drift detected in ${TF_ENV} — Terraform plan shows pending changes above."
+          fi
+
           echo "plan_exit=$PLAN_EXIT" >> "$GITHUB_OUTPUT"
+          echo "DRIFT_PLAN_EXIT=$PLAN_EXIT" >> "$GITHUB_ENV"
 
 
       - name: Upload drift plan artifact
@@ -134,24 +142,26 @@ jobs:
           path: environments/${TF_ENV}/plan-output.txt
 
       - name: Write drift summary
-        if: inputs.operation == 'drift' && always()
+        if: inputs.operation == 'drift'
         shell: bash
         run: |
-          if [ "${{ steps.drift.outputs.plan_exit }}" = "0" ]; then
-            echo "### Nightly Drift Check - ${TF_ENV}" >> "$GITHUB_STEP_SUMMARY"
-            echo "No drift detected." >> "$GITHUB_STEP_SUMMARY"
-          elif [ "${{ steps.drift.outputs.plan_exit }}" = "2" ]; then
-            echo "### Nightly Drift Check - ${TF_ENV}" >> "$GITHUB_STEP_SUMMARY"
-            echo "Drift detected. Review artifact: terraform-drift-${TF_ENV}" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${DRIFT_PLAN_EXIT}" = "0" ]; then
+            echo "### Drift Check — ${TF_ENV}" >> "$GITHUB_STEP_SUMMARY"
+            echo "No drift detected. Infrastructure matches Terraform state." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "${DRIFT_PLAN_EXIT}" = "2" ]; then
+            echo "### Drift Check — ${TF_ENV}" >> "$GITHUB_STEP_SUMMARY"
+            echo "**:warning: Drift detected.** The plan above shows changes required to reconcile AWS with Terraform state." >> "$GITHUB_STEP_SUMMARY"
+            echo "Download artifact \`terraform-drift-${TF_ENV}\` for the full diff." >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "### Nightly Drift Check - ${TF_ENV}" >> "$GITHUB_STEP_SUMMARY"
+            echo "### Drift Check — ${TF_ENV}" >> "$GITHUB_STEP_SUMMARY"
             echo "Plan did not complete normally. Check job logs." >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Fail on detected drift
-        if: inputs.operation == 'drift' && inputs.fail_on_drift && steps.drift.outputs.plan_exit == '2'
+        if: always() && inputs.operation == 'drift' && inputs.fail_on_drift == true && env.DRIFT_PLAN_EXIT == '2'
+        shell: bash
         run: |
-          echo "Drift detected for ${TF_ENV}"
+          echo "::error::Drift detected in ${TF_ENV}. Review the plan output above or download artifact terraform-drift-${TF_ENV}."
           exit 1
 
       - name: Terraform apply
