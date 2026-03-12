@@ -64,7 +64,7 @@ jobs:
       TF_ENV: ${{ inputs.target_environment }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Terraform common setup and checks
         uses: ./.github/actions/terraform-setup-common
