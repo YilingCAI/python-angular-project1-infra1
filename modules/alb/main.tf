@@ -28,64 +28,17 @@ resource "aws_s3_bucket_versioning" "alb_logs" {
   }
 }
 
-# Enable server-side encryption with KMS (CKV_AWS_27, CKV_AWS_145)
-resource "aws_kms_key" "alb_logs" {
-  description             = "KMS key for ALB logs bucket"
-  deletion_window_in_days = 10
-  enable_key_rotation     = true
-
-  tags = {
-    Name = "${var.project_name}-alb-logs-key"
-  }
-}
-
-resource "aws_kms_alias" "alb_logs" {
-  name          = "alias/${var.project_name}-alb-logs"
-  target_key_id = aws_kms_key.alb_logs.key_id
-}
-
-# KMS Key Policy for ALB logs S3 bucket (CKV2_AWS_64)
-resource "aws_kms_key_policy" "alb_logs" {
-  key_id = aws_kms_key.alb_logs.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "Enable IAM User Permissions"
-        Effect = "Allow"
-        Principal = {
-          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
-        }
-        Action   = "kms:*"
-        Resource = "*"
-      },
-      {
-        Sid    = "Allow S3 to use the key for encryption"
-        Effect = "Allow"
-        Principal = {
-          Service = "s3.amazonaws.com"
-        }
-        Action = [
-          "kms:Decrypt",
-          "kms:GenerateDataKey*",
-          "kms:DescribeKey"
-        ]
-        Resource = "*"
-      }
-    ]
-  })
-}
-
+# Enable server-side encryption with AES256 (CKV_AWS_27)
+# NOTE: ALB log delivery service does NOT support SSE-KMS — it requires SSE-S3 (AES256).
+# Using aws:kms here will cause "Access Denied" errors when ELB tries to write logs.
 resource "aws_s3_bucket_server_side_encryption_configuration" "alb_logs" {
   bucket = aws_s3_bucket.alb_logs.id
 
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm     = "aws:kms"
-      kms_master_key_id = aws_kms_key.alb_logs.arn
+      sse_algorithm = "AES256"
     }
-    bucket_key_enabled = true
+    bucket_key_enabled = false
   }
 }
 
@@ -132,7 +85,12 @@ resource "aws_s3_bucket_public_access_block" "alb_logs" {
   restrict_public_buckets = true
 }
 
-# Bucket policy for ALB to write logs with encryption enforcement
+# Bucket policy for ALB to write logs
+# NOTE: The DenyUnencryptedObjectUploads statement is intentionally omitted.
+# The ELB log delivery service writes with SSE-S3 and does not send an
+# s3:x-amz-server-side-encryption header, so a deny-if-not-encrypted policy
+# would block all log delivery. Bucket default encryption (AES256) ensures
+# all objects are encrypted at rest.
 resource "aws_s3_bucket_policy" "alb_logs" {
   bucket = aws_s3_bucket.alb_logs.id
 
@@ -140,18 +98,7 @@ resource "aws_s3_bucket_policy" "alb_logs" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid       = "DenyUnencryptedObjectUploads"
-        Effect    = "Deny"
-        Principal = "*"
-        Action    = "s3:PutObject"
-        Resource  = "${aws_s3_bucket.alb_logs.arn}/*"
-        Condition = {
-          StringNotEquals = {
-            "s3:x-amz-server-side-encryption" = "aws:kms"
-          }
-        }
-      },
-      {
+        Sid    = "AllowELBServiceAccountPutObject"
         Effect = "Allow"
         Principal = {
           AWS = data.aws_elb_service_account.main.arn
@@ -170,6 +117,20 @@ resource "aws_s3_bucket_policy" "alb_logs" {
         Condition = {
           StringEquals = {
             "s3:x-amz-acl" = "bucket-owner-full-control"
+          }
+        }
+      },
+      {
+        Sid    = "DenyNonHTTPS"
+        Effect = "Deny"
+        Principal = {
+          AWS = "*"
+        }
+        Action   = "s3:*"
+        Resource = ["${aws_s3_bucket.alb_logs.arn}", "${aws_s3_bucket.alb_logs.arn}/*"]
+        Condition = {
+          Bool = {
+            "aws:SecureTransport" = "false"
           }
         }
       }
