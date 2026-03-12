@@ -112,13 +112,16 @@ jobs:
         id: drift
         shell: bash
         run: |
-          set +o pipefail
+          # Disable both errexit (-e) and pipefail so that:
+          #   - terraform exit code 2 (drift) does not abort the script
+          #   - PIPESTATUS[0] is still reachable after the pipe
+          set +eo pipefail
           terraform -chdir="environments/${TF_ENV}" plan -detailed-exitcode \
             ${{ steps.vars.outputs.var_file_arg }} \
             -lock-timeout=5m \
             -no-color 2>&1 | tee "environments/${TF_ENV}/plan-output.txt"
           PLAN_EXIT="${PIPESTATUS[0]}"
-          set -o pipefail
+          set -eo pipefail
 
           echo "plan_exit=${PLAN_EXIT}" >> "$GITHUB_OUTPUT"
 
