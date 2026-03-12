@@ -97,10 +97,11 @@ resource "aws_db_instance" "main" {
   password               = random_password.db_password.result
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [var.rds_security_group_id]
+  storage_type = "gp3"
 
   # Security
   skip_final_snapshot                 = false
-  final_snapshot_identifier           = "${var.project_name}-db-final-snapshot-${formatdate("YYYY-MM-DD-hhmm", timestamp())}"
+  final_snapshot_identifier           = "${var.project_name}-db-final-snapshot"
   copy_tags_to_snapshot               = true
   publicly_accessible                 = false
   storage_encrypted                   = true
@@ -117,7 +118,7 @@ resource "aws_db_instance" "main" {
   parameter_group_name       = aws_db_parameter_group.main.name
 
   # Monitoring
-  enabled_cloudwatch_logs_exports = ["postgresql"]
+  enabled_cloudwatch_logs_exports = ["postgresql", "upgrade"]
   monitoring_interval             = 60
   monitoring_role_arn             = aws_iam_role.rds_monitoring.arn
 
