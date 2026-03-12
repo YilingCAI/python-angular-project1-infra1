@@ -76,6 +76,12 @@ resource "aws_db_parameter_group" "main" {
   tags = {
     Name = "${var.project_name}-pg"
   }
+    lifecycle {
+      ignore_changes = [
+        final_snapshot_identifier,
+        tags
+      ]
+    }
 
   lifecycle {
     create_before_destroy = true
