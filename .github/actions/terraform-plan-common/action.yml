@@ -100,17 +100,110 @@ runs:
         script: |
           const fs = require('fs');
           const envName = '${{ inputs.target_environment }}';
-          const bodyPlan = fs.readFileSync(`environments/${envName}/plan-output.txt`, 'utf8').substring(0, 65000);
-          const marker = `## Terraform Plan (${envName})`;
-          const body = `${marker}\n\n\`\`\`hcl\n${bodyPlan}\n\`\`\``;
+          const planFile = `environments/${envName}/plan-output.txt`;
+          const infracostFile = `environments/${envName}/infracost.json`;
+          const runUrl = `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+          const sha = '${{ github.sha }}'.substring(0, 8);
+          const commitUrl = `${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}`;
 
-          const comments = await github.rest.issues.listComments({
+          // ── Parse plan output ───────────────────────────────────────────
+          const planRaw = fs.existsSync(planFile)
+            ? fs.readFileSync(planFile, 'utf8')
+            : '(plan output not found)';
+
+          // Extract summary line: "Plan: X to add, Y to change, Z to destroy."
+          const summaryMatch = planRaw.match(/Plan:\s+(\d+) to add,\s+(\d+) to change,\s+(\d+) to destroy/);
+          const toAdd     = summaryMatch ? parseInt(summaryMatch[1]) : 0;
+          const toChange  = summaryMatch ? parseInt(summaryMatch[2]) : 0;
+          const toDestroy = summaryMatch ? parseInt(summaryMatch[3]) : 0;
+          const hasChanges = toAdd > 0 || toChange > 0 || toDestroy > 0;
+          const noChanges  = planRaw.includes('No changes.');
+
+          // Status badge
+          let statusBadge;
+          if (noChanges)           statusBadge = '✅ No changes';
+          else if (toDestroy > 0)  statusBadge = '🔴 Changes detected (includes destroys)';
+          else if (hasChanges)     statusBadge = '🟡 Changes detected';
+          else                     statusBadge = '⚪ Unknown';
+
+          // Extract affected resource addresses
+          const driftedResources = [...planRaw.matchAll(/^  # (.+) will be (updated|destroyed|created|replaced)/gm)]
+            .map(m => `\`${m[1]}\` — **${m[2]}**`)
+            .join('\n');
+
+          // Truncate plan for display (GitHub comment limit is 65536 chars)
+          const planDisplay = planRaw.length > 30000
+            ? planRaw.substring(0, 30000) + '\n\n... (truncated — see full output in workflow run)'
+            : planRaw;
+
+          // ── Infracost summary ────────────────────────────────────────────
+          let infracostSection = '';
+          if (fs.existsSync(infracostFile)) {
+            try {
+              const ic = JSON.parse(fs.readFileSync(infracostFile, 'utf8'));
+              const totalMonthly = ic.totalMonthlyCost ?? ic.summary?.totalMonthlyCost ?? null;
+              const totalDiff    = ic.diffTotalMonthlyCost ?? null;
+              if (totalMonthly !== null) {
+                const diffStr = totalDiff !== null
+                  ? ` (diff: ${parseFloat(totalDiff) >= 0 ? '+' : ''}$${parseFloat(totalDiff).toFixed(2)}/mo)`
+                  : '';
+                infracostSection = `\n### 💰 Infracost estimate\n\n` +
+                  `| | |\n|---|---|\n` +
+                  `| **Estimated monthly cost** | \`$${parseFloat(totalMonthly).toFixed(2)}/mo${diffStr}\` |\n`;
+              }
+            } catch (_) { /* infracost parse failed, skip */ }
+          }
+
+          // ── Build comment body ───────────────────────────────────────────
+          const marker = `<!-- terraform-plan-${envName} -->`;
+          const body = [
+            marker,
+            `## 📋 Terraform Plan — \`${envName}\``,
+            '',
+            `| | |`,
+            `|---|---|`,
+            `| **Status** | ${statusBadge} |`,
+            `| **Environment** | \`${envName}\` |`,
+            `| **Commit** | [\`${sha}\`](${commitUrl}) |`,
+            `| **Workflow run** | [#${{ github.run_number }}](${runUrl}) |`,
+            `| **Mode** | ${{ inputs.speculative_plan == 'true' && 'Speculative (no state lock)' || 'Real plan (state locked)' }} |`,
+            '',
+            ...(hasChanges ? [
+              '### 📊 Change summary',
+              '',
+              '| Change type | Count |',
+              '|---|:---:|',
+              `| 🟢 To add | ${toAdd} |`,
+              `| 🟡 To change | ${toChange} |`,
+              `| 🔴 To destroy | ${toDestroy} |`,
+            ] : []),
+            ...(driftedResources ? [
+              '',
+              '### 📝 Affected resources',
+              '',
+              driftedResources,
+            ] : []),
+            infracostSection,
+            '',
+            '<details>',
+            `<summary>📄 Full plan output (click to expand)</summary>`,
+            '',
+            '```hcl',
+            planDisplay,
+            '```',
+            '</details>',
+            '',
+            `> _Triggered by @${{ github.actor }} · ${new Date().toUTCString()}_`,
+          ].join('\n');
+
+          // ── Upsert comment ───────────────────────────────────────────────
+          const { data: comments } = await github.rest.issues.listComments({
             owner: context.repo.owner,
             repo: context.repo.repo,
             issue_number: context.issue.number,
           });
 
-          const existing = comments.data.find(c => c.user?.type === 'Bot' && c.body?.startsWith(marker));
+          const existing = comments.find(c => c.body?.includes(marker));
 
           if (existing) {
             await github.rest.issues.updateComment({
