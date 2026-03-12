@@ -60,6 +60,7 @@ runs:
       uses: hashicorp/setup-terraform@v3
       with:
         terraform_version: 1.10.5
+        terraform_wrapper: false
 
     - name: Configure Terraform cache
       shell: bash
