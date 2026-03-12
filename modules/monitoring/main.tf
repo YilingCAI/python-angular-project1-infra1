@@ -43,6 +43,17 @@ resource "aws_cloudwatch_metric_alarm" "ecs_cpu_high" {
   }
 
   tags = { Name = "${var.project_name}-ecs-cpu-high" }
+    lifecycle {
+      ignore_changes = [
+        alarm_actions,
+        alarm_description,
+        ok_actions,
+        period,
+        threshold,
+        treat_missing_data,
+        tags
+      ]
+    }
 }
 
 resource "aws_cloudwatch_metric_alarm" "ecs_memory_high" {
@@ -65,6 +76,17 @@ resource "aws_cloudwatch_metric_alarm" "ecs_memory_high" {
   }
 
   tags = { Name = "${var.project_name}-ecs-memory-high" }
+    lifecycle {
+      ignore_changes = [
+        alarm_actions,
+        alarm_description,
+        ok_actions,
+        period,
+        threshold,
+        treat_missing_data,
+        tags
+      ]
+    }
 }
 
 # ─── Alarms: ECS Frontend ────────────────────────────────────────────────────
@@ -88,6 +110,17 @@ resource "aws_cloudwatch_metric_alarm" "ecs_frontend_cpu_high" {
   }
 
   tags = { Name = "${var.project_name}-ecs-frontend-cpu-high" }
+    lifecycle {
+      ignore_changes = [
+        alarm_actions,
+        alarm_description,
+        ok_actions,
+        period,
+        threshold,
+        treat_missing_data,
+        tags
+      ]
+    }
 }
 
 resource "aws_cloudwatch_metric_alarm" "ecs_frontend_memory_high" {
@@ -110,6 +143,17 @@ resource "aws_cloudwatch_metric_alarm" "ecs_frontend_memory_high" {
   }
 
   tags = { Name = "${var.project_name}-ecs-frontend-memory-high" }
+    lifecycle {
+      ignore_changes = [
+        alarm_actions,
+        alarm_description,
+        ok_actions,
+        period,
+        threshold,
+        treat_missing_data,
+        tags
+      ]
+    }
 }
 
 # ─── Alarms: RDS ─────────────────────────────────────────────────────────────
@@ -132,6 +176,17 @@ resource "aws_cloudwatch_metric_alarm" "rds_cpu_high" {
   }
 
   tags = { Name = "${var.project_name}-rds-cpu-high" }
+    lifecycle {
+      ignore_changes = [
+        alarm_actions,
+        alarm_description,
+        ok_actions,
+        period,
+        threshold,
+        treat_missing_data,
+        tags
+      ]
+    }
 }
 
 resource "aws_cloudwatch_metric_alarm" "rds_free_storage_low" {
@@ -153,6 +208,17 @@ resource "aws_cloudwatch_metric_alarm" "rds_free_storage_low" {
   }
 
   tags = { Name = "${var.project_name}-rds-storage-low" }
+    lifecycle {
+      ignore_changes = [
+        alarm_actions,
+        alarm_description,
+        ok_actions,
+        period,
+        threshold,
+        treat_missing_data,
+        tags
+      ]
+    }
 }
 
 resource "aws_cloudwatch_metric_alarm" "rds_connections_high" {
@@ -174,6 +240,17 @@ resource "aws_cloudwatch_metric_alarm" "rds_connections_high" {
   }
 
   tags = { Name = "${var.project_name}-rds-connections-high" }
+    lifecycle {
+      ignore_changes = [
+        alarm_actions,
+        alarm_description,
+        ok_actions,
+        period,
+        threshold,
+        treat_missing_data,
+        tags
+      ]
+    }
 }
 
 # ─── Alarms: ALB ─────────────────────────────────────────────────────────────
@@ -196,6 +273,17 @@ resource "aws_cloudwatch_metric_alarm" "alb_5xx_high" {
   }
 
   tags = { Name = "${var.project_name}-alb-5xx-high" }
+    lifecycle {
+      ignore_changes = [
+        alarm_actions,
+        alarm_description,
+        ok_actions,
+        period,
+        threshold,
+        treat_missing_data,
+        tags
+      ]
+    }
 }
 
 resource "aws_cloudwatch_metric_alarm" "alb_latency_high" {
@@ -217,6 +305,17 @@ resource "aws_cloudwatch_metric_alarm" "alb_latency_high" {
   }
 
   tags = { Name = "${var.project_name}-alb-latency-high" }
+    lifecycle {
+      ignore_changes = [
+        alarm_actions,
+        alarm_description,
+        ok_actions,
+        period,
+        threshold,
+        treat_missing_data,
+        tags
+      ]
+    }
 }
 
 # ─── CloudWatch Dashboard ─────────────────────────────────────────────────────
