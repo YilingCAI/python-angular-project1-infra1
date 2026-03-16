@@ -214,8 +214,6 @@ module "ecs_frontend" {
   private_subnet_ids    = module.network.private_subnet_ids
   ecs_security_group_id = module.network.ecs_tasks_security_group_id
   target_group_arn      = module.alb.frontend_target_group_arn
-
-  depends_on = [module.alb, module.ecs]
 }
 
 module "monitoring" {
