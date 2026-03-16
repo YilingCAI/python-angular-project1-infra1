@@ -1,14 +1,13 @@
 name: Terraform Plan Speculative
 
+# Speculative plans run on pull requests and pushes to main (Terraform-related changes).
+# These plans use a local backend override (no state writes) and post rich PR comments.
+# Security and cost checks are enabled; Infracost estimates are included when available.
+#
+# Promotion order: dev → staging → prod (each waits for the prior to succeed).
+
 on:
   pull_request:
-    branches: [main]
-    paths:
-      - '**/*.tf'
-      - '**/*.tfvars'
-      - '**/.terraform.lock.hcl'
-      - '!bootstrap/**'
-  push:
     branches: [main]
     paths:
       - '**/*.tf'
@@ -22,11 +21,6 @@ on:
         required: true
         type: choice
         options: [dev, staging, prod, all]
-      action:
-        description: Terraform action
-        required: true
-        type: choice
-        options: [plan]
 
 permissions:
   contents: read
@@ -34,17 +28,20 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: terraform-plan-${{ inputs.environment }}-${{ github.ref }}
+  group: terraform-speculative-${{ github.event.inputs.environment || 'all' }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # ─── Speculative plans on pull requests (no backend state writes) ─────────
-
   plan-dev:
-    if: (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'dev') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'all')
-    uses: ./.github/workflows/terraform-plan-speculative-reusable.yml
+    name: Speculative Plan [dev]
+    if: >-
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'workflow_dispatch' &&
+        (inputs.environment == 'dev' || inputs.environment == 'all'))
+    uses: ./.github/workflows/terraform-plan-reusable.yml
     with:
       target_environment: dev
+      speculative: true
       enable_security_checks: true
       checkov_enforcement: advisory
       enable_pr_comment: true
@@ -52,11 +49,19 @@ jobs:
     secrets: inherit
 
   plan-staging:
+    name: Speculative Plan [staging]
     needs: [plan-dev]
-    if: (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'all')
-    uses: ./.github/workflows/terraform-plan-speculative-reusable.yml
+    if: >-
+      needs.plan-dev.result == 'success' &&
+      (
+        github.event_name == 'pull_request' ||
+        (github.event_name == 'workflow_dispatch' &&
+          (inputs.environment == 'staging' || inputs.environment == 'all'))
+      )
+    uses: ./.github/workflows/terraform-plan-reusable.yml
     with:
       target_environment: staging
+      speculative: true
       enable_security_checks: true
       checkov_enforcement: advisory
       enable_pr_comment: false
@@ -64,11 +69,19 @@ jobs:
     secrets: inherit
 
   plan-prod:
+    name: Speculative Plan [prod]
     needs: [plan-staging]
-    if: (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'prod') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'all')
-    uses: ./.github/workflows/terraform-plan-speculative-reusable.yml
+    if: >-
+      needs.plan-staging.result == 'success' &&
+      (
+        github.event_name == 'pull_request' ||
+        (github.event_name == 'workflow_dispatch' &&
+          (inputs.environment == 'prod' || inputs.environment == 'all'))
+      )
+    uses: ./.github/workflows/terraform-plan-reusable.yml
     with:
       target_environment: prod
+      speculative: true
       enable_security_checks: true
       checkov_enforcement: advisory
       enable_pr_comment: false
