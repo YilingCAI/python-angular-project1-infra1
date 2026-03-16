@@ -22,6 +22,11 @@ on:
         description: Name of the artifact that contains tfplan.binary (produced by terraform-plan-reusable.yml)
         required: true
         type: string
+      saved_plan_artifact_id:
+        description: Exact artifact ID to download (preferred; avoids name collisions on reruns)
+        required: false
+        type: string
+        default: ""
       fail_on_drift:
         description: Fail apply when drift is detected immediately before apply
         required: false
@@ -135,7 +140,16 @@ jobs:
           exit 1
 
       # ── Download saved plan artifact ──────────────────────────────────────────
-      - name: Download saved plan artifact
+      - name: Download saved plan artifact (by ID)
+        if: ${{ inputs.saved_plan_artifact_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ inputs.saved_plan_artifact_id }}
+          merge-multiple: true
+          path: environments/${{ inputs.target_environment }}
+
+      - name: Download saved plan artifact (by name fallback)
+        if: ${{ inputs.saved_plan_artifact_id == '' }}
         uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.saved_plan_artifact_name }}
@@ -173,6 +187,7 @@ jobs:
             echo "|---|---|"
             echo "| **Environment** | \`${TF_ENV}\` |"
             echo "| **Plan artifact** | \`${{ inputs.saved_plan_artifact_name }}\` |"
+            echo "| **Plan artifact ID** | \`${{ inputs.saved_plan_artifact_id != '' && inputs.saved_plan_artifact_id || 'name fallback' }}\` |"
             echo "| **Pre-apply drift check** | exit code ${{ steps.drift.outputs.drift_exit }} |"
             echo "| **Pre-apply state version** | \`${{ steps.state_version.outputs.version_id }}\` |"
             echo "| **Triggered by** | @${{ github.actor }} |"

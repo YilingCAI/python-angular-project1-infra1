@@ -98,6 +98,7 @@ jobs:
       target_environment: dev
       github_environment: dev
       saved_plan_artifact_name: terraform-plan-dev
+      saved_plan_artifact_id: ${{ needs.plan-dev.outputs.plan_artifact_id }}
       fail_on_drift: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dev_allow_apply_on_drift) }}
     secrets: inherit
 
@@ -139,6 +140,7 @@ jobs:
       target_environment: staging
       github_environment: staging
       saved_plan_artifact_name: terraform-plan-staging
+      saved_plan_artifact_id: ${{ needs.plan-staging.outputs.plan_artifact_id }}
       fail_on_drift: true
     secrets: inherit
 
@@ -180,5 +182,6 @@ jobs:
       target_environment: prod
       github_environment: prod
       saved_plan_artifact_name: terraform-plan-prod
+      saved_plan_artifact_id: ${{ needs.plan-prod.outputs.plan_artifact_id }}
       fail_on_drift: true
     secrets: inherit
