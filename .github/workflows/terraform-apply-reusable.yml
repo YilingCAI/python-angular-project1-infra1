@@ -93,7 +93,7 @@ jobs:
 
       - name: Download saved plan artifact
         if: inputs.operation == 'apply' && inputs.apply_use_saved_plan && inputs.saved_plan_artifact_name != ''
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ inputs.saved_plan_artifact_name }}
           path: environments/${{ inputs.target_environment }}
