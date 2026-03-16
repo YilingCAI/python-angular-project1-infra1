@@ -62,6 +62,10 @@ on:
         required: false
       INFRACOST_API_KEY:
         required: false
+    outputs:
+      plan_artifact_id:
+        description: Uploaded plan artifact ID for deterministic downstream apply download
+        value: ${{ jobs.terraform-plan.outputs.plan_artifact_id }}
 
 permissions:
   contents: read
@@ -78,6 +82,8 @@ jobs:
     environment: ${{ inputs.github_environment != '' && inputs.github_environment || inputs.target_environment }}
     env:
       TF_ENV: ${{ inputs.target_environment }}
+    outputs:
+      plan_artifact_id: ${{ steps.plan_common.outputs.plan_artifact_id }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -98,6 +104,7 @@ jobs:
           role_session_name_prefix: ${{ inputs.drift && 'gha-terraform-drift' || inputs.speculative && 'gha-terraform-plan-speculative' || 'gha-terraform-plan' }}
 
       - name: Terraform shared plan steps
+        id: plan_common
         uses: ./.github/actions/terraform-plan-common
         with:
           target_environment: ${{ inputs.target_environment }}
