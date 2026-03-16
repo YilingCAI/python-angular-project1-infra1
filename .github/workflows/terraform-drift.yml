@@ -1,4 +1,8 @@
-name: Terraform Drift
+name: Terraform Drift Detection
+
+# Runs a drift-detection plan against each environment's live state.
+# Schedule: nightly at 02:30 UTC — all environments.
+# Manual: choose a specific environment or all.
 
 on:
   schedule:
@@ -17,37 +21,62 @@ permissions:
   id-token: write
   pull-requests: write
 
+# Each run gets a unique concurrency key so scheduled runs never cancel each other.
 concurrency:
-  group: terraform-drift-${{ github.event_name }}-${{ github.run_id }}
+  group: terraform-drift-${{ github.event.inputs.environment || 'all' }}-${{ github.run_id }}
   cancel-in-progress: false
 
 jobs:
   drift-dev:
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.environment == 'dev')
-    uses: ./.github/workflows/terraform-apply-reusable.yml
+    name: Drift – dev
+    if: >-
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && (inputs.environment == 'dev' || inputs.environment == 'all'))
+    uses: ./.github/workflows/terraform-plan-reusable.yml
     with:
       target_environment: dev
       github_environment: dev
-      operation: drift
+      speculative: false
+      drift: true
       fail_on_drift: true
+      enable_security_checks: false
+      enable_pr_comment: false
     secrets: inherit
 
   drift-staging:
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging')
-    uses: ./.github/workflows/terraform-apply-reusable.yml
+    name: Drift – staging
+    needs: [drift-dev]
+    if: >-
+      always() && (
+        github.event_name == 'schedule' ||
+        (github.event_name == 'workflow_dispatch' && (inputs.environment == 'staging' || inputs.environment == 'all'))
+      )
+    uses: ./.github/workflows/terraform-plan-reusable.yml
     with:
       target_environment: staging
       github_environment: staging
-      operation: drift
+      speculative: false
+      drift: true
       fail_on_drift: true
+      enable_security_checks: false
+      enable_pr_comment: false
     secrets: inherit
 
   drift-prod:
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.environment == 'prod')
-    uses: ./.github/workflows/terraform-apply-reusable.yml
+    name: Drift – prod
+    needs: [drift-staging]
+    if: >-
+      always() && (
+        github.event_name == 'schedule' ||
+        (github.event_name == 'workflow_dispatch' && (inputs.environment == 'prod' || inputs.environment == 'all'))
+      )
+    uses: ./.github/workflows/terraform-plan-reusable.yml
     with:
       target_environment: prod
       github_environment: prod
-      operation: drift
+      speculative: false
+      drift: true
       fail_on_drift: true
+      enable_security_checks: false
+      enable_pr_comment: false
     secrets: inherit

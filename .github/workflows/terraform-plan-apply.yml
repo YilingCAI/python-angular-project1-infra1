@@ -1,11 +1,11 @@
-name: Terraform Apply
+name: Terraform Plan Apply
 
 on:
   # Triggered automatically after "Terraform Plan" completes on a push to main.
   # Only fires when the plan workflow ran due to a push (not a scheduled drift
   # check or a manual workflow_dispatch plan run).
   workflow_run:
-    workflows: ["Terraform Plan"]
+    workflows: ["Terraform Plan Speculative"]
     types: [completed]
     branches: [main]
 
