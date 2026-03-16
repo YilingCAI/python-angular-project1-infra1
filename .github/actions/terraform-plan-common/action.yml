@@ -1,17 +1,28 @@
 name: Terraform Plan Shared Steps
 
-description: Shared Terraform plan, optional Infracost, artifact upload, and optional PR comment.
+description: >
+  Shared Terraform plan steps: speculative plan, real plan, drift plan, optional
+  Infracost, artifact upload, optional PR comment, and drift summary reporting.
+  Callers select the operating mode via speculative_plan / drift_plan inputs.
 
 inputs:
   target_environment:
     description: Terraform target environment (dev/staging/prod)
     required: true
   speculative_plan:
-    description: Run speculative plan mode (no saved plan, no state lock)
+    description: "Run speculative plan mode (no saved plan, no state lock). Mutually exclusive with drift_plan."
     required: false
     default: "false"
+  drift_plan:
+    description: "Run drift-detection plan (uses -detailed-exitcode, uploads drift artifact, writes drift summary). Mutually exclusive with speculative_plan."
+    required: false
+    default: "false"
+  fail_on_drift:
+    description: Fail the step (exit 1) when drift is detected (only meaningful when drift_plan=true)
+    required: false
+    default: "true"
   enable_infracost:
-    description: Run Infracost when API key exists
+    description: Run Infracost when API key exists (only meaningful when speculative_plan=true)
     required: false
     default: "false"
   infracost_api_key:
@@ -56,8 +67,8 @@ runs:
           -json \
           "plan.tfplan" > "environments/${{ inputs.target_environment }}/plan.json"
 
-    - name: Terraform plan (real)
-      if: ${{ inputs.speculative_plan != 'true' }}
+    - name: Terraform plan (real – saves artifact for apply)
+      if: ${{ inputs.speculative_plan != 'true' && inputs.drift_plan != 'true' }}
       shell: bash
       run: |
         terraform -chdir="environments/${{ inputs.target_environment }}" plan \
@@ -65,6 +76,124 @@ runs:
           -lock-timeout=5m \
           -out="tfplan.binary" \
           -no-color 2>&1 | tee "environments/${{ inputs.target_environment }}/plan-output.txt"
+
+    # ── Drift-detection plan ──────────────────────────────────────────────────
+    # Uses -detailed-exitcode: 0=no changes, 1=error, 2=changes/drift.
+    # We capture the exit code and store it for downstream reporting/failing.
+    - name: Terraform drift plan
+      if: ${{ inputs.drift_plan == 'true' }}
+      id: drift
+      shell: bash
+      run: |
+        PLAN_FILE="environments/${{ inputs.target_environment }}/plan-output.txt"
+        PLAN_EXIT=0
+        terraform -chdir="environments/${{ inputs.target_environment }}" plan \
+          -detailed-exitcode \
+          ${{ steps.vars.outputs.var_file_arg }} \
+          -lock-timeout=5m \
+          -no-color > "${PLAN_FILE}" 2>&1 || PLAN_EXIT=$?
+
+        cat "${PLAN_FILE}"
+        echo "plan_exit=${PLAN_EXIT}" >> "$GITHUB_OUTPUT"
+
+        if [ "${PLAN_EXIT}" -eq 1 ]; then
+          echo "::error::Terraform plan errored for environment ${{ inputs.target_environment }}. See logs."
+          exit 1
+        fi
+        # Exit 2 = drift; do NOT exit here — let summary/artifact steps run first.
+
+    - name: Upload drift artifact
+      if: ${{ inputs.drift_plan == 'true' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: terraform-drift-${{ inputs.target_environment }}
+        path: environments/${{ inputs.target_environment }}/plan-output.txt
+        retention-days: 30
+
+    - name: Write drift job summary
+      if: ${{ inputs.drift_plan == 'true' }}
+      shell: bash
+      run: |
+        PLAN_FILE="environments/${{ inputs.target_environment }}/plan-output.txt"
+        PLAN_EXIT="${{ steps.drift.outputs.plan_exit }}"
+        RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+        {
+          echo "## :mag: Terraform Drift Report — \`${{ inputs.target_environment }}\`"
+          echo ""
+          echo "| | |"
+          echo "|---|---|"
+          echo "| **Environment** | \`${{ inputs.target_environment }}\` |"
+          echo "| **Triggered by** | \`${{ github.event_name }}\` |"
+          echo "| **Commit** | [\`${GITHUB_SHA::8}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}) |"
+          echo "| **Run** | [#${{ github.run_number }}](${RUN_URL}) |"
+          echo ""
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        if [ "${PLAN_EXIT}" = "0" ]; then
+          {
+            echo "### :white_check_mark: No drift detected"
+            echo ""
+            echo "Infrastructure in \`${{ inputs.target_environment }}\` matches Terraform state."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+        elif [ "${PLAN_EXIT}" = "2" ]; then
+          SUMMARY_LINE=$(grep -E "^Plan:" "${PLAN_FILE}" || true)
+          TO_ADD=$(echo "${SUMMARY_LINE}"     | grep -oP '\d+(?= to add)'     || echo "0")
+          TO_CHANGE=$(echo "${SUMMARY_LINE}"  | grep -oP '\d+(?= to change)'  || echo "0")
+          TO_DESTROY=$(echo "${SUMMARY_LINE}" | grep -oP '\d+(?= to destroy)' || echo "0")
+
+          DRIFTED_RESOURCES=$(grep -E "^  # .+ will be (updated|destroyed|created|replaced)" "${PLAN_FILE}" \
+            | sed -E 's/^  # (.+) will be.*/\1/' \
+            | sort \
+            || true)
+
+          {
+            echo "### :rotating_light: Drift detected"
+            echo ""
+            echo "**${SUMMARY_LINE}**"
+            echo ""
+            echo "| Change type | Count |"
+            echo "|---|:---:|"
+            echo "| :green_circle: To add | ${TO_ADD} |"
+            echo "| :yellow_circle: To change | ${TO_CHANGE} |"
+            echo "| :red_circle: To destroy | ${TO_DESTROY} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -n "${DRIFTED_RESOURCES}" ]; then
+            {
+              echo ""
+              echo "#### Affected resources"
+              echo ""
+              echo '```'
+              echo "${DRIFTED_RESOURCES}"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          {
+            echo ""
+            echo "> :paperclip: Full diff available in artifact **\`terraform-drift-${{ inputs.target_environment }}\`**"
+            echo ""
+            echo "> **Action required:** Review the drift and either:"
+            echo "> 1. Run \`terraform apply\` to reconcile state, or"
+            echo "> 2. Import / update Terraform config to reflect the intentional change."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+        else
+          {
+            echo "### :x: Plan did not complete"
+            echo ""
+            echo "Terraform exited with code \`${PLAN_EXIT}\`. Check the job logs for errors."
+          } >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Fail on detected drift
+      if: ${{ inputs.drift_plan == 'true' && inputs.fail_on_drift == 'true' && steps.drift.outputs.plan_exit == '2' }}
+      shell: bash
+      run: |
+        echo "::error::Drift detected in ${{ inputs.target_environment }}. Review the job summary and artifact terraform-drift-${{ inputs.target_environment }}."
+        exit 1
 
     - name: Setup Infracost
       if: ${{ inputs.speculative_plan == 'true' && inputs.enable_infracost == 'true' && inputs.infracost_api_key != '' }}
@@ -82,6 +211,7 @@ runs:
           --out-file="environments/${{ inputs.target_environment }}/infracost.json"
 
     - name: Upload plan artifact
+      if: ${{ inputs.drift_plan != 'true' }}
       uses: actions/upload-artifact@v4
       with:
         name: terraform-plan-${{ inputs.target_environment }}
