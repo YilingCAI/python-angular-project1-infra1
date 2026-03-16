@@ -16,6 +16,11 @@ name: Terraform Plan & Apply
 #   job downloads and applies it. This guarantees we apply exactly what was reviewed.
 
 on:
+  workflow_run:
+    workflows: ["Terraform Plan Speculative"]
+    types: [completed]
+    branches: [main]
+
   push:
     branches: [main]
     paths:
