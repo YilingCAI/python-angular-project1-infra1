@@ -1,0 +1,121 @@
+name: Terraform Untaint
+
+# Emergency workflow_dispatch to remove taint flags from Terraform state.
+# Use this when "Block apply — tainted resources" stops a staging/prod apply.
+#
+# Flow:
+#   1. Provide the target environment and space-separated resource addresses
+#      (copy the addresses from the "Block apply" error messages).
+#   2. The workflow untaints each resource in the remote S3-backed state.
+#   3. Re-run the plan workflow, then approve and apply as normal.
+#
+# Never untaint without understanding WHY the resource was tainted.
+# A taint means a prior apply partially failed on that resource.
+# Confirm the resource is healthy in AWS before untainting.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment (dev / staging / prod)"
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      resource_addresses:
+        description: "Space-separated Terraform resource addresses to untaint (e.g. module.alb.aws_lb.main)"
+        required: true
+        type: string
+      confirmation:
+        description: "Type 'untaint' to confirm you have verified the resources are healthy in AWS"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  terraform-untaint:
+    name: "Untaint [${{ inputs.environment }}]"
+    runs-on: ubuntu-latest
+    concurrency:
+      group: terraform-state-${{ inputs.environment }}
+      cancel-in-progress: false
+    environment: ${{ inputs.environment }}
+    env:
+      TF_ENV: ${{ inputs.environment }}
+
+    steps:
+      - name: Validate confirmation
+        shell: bash
+        run: |
+          if [ "${{ inputs.confirmation }}" != "untaint" ]; then
+            echo "::error::Confirmation text must be exactly 'untaint'. Got: '${{ inputs.confirmation }}'"
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Terraform common setup
+        uses: ./.github/actions/terraform-setup-common
+        with:
+          target_environment: ${{ inputs.environment }}
+          operation: apply
+          aws_region: ${{ vars.AWS_REGION }}
+          terraform_state_bucket: ${{ secrets.TERRAFORM_STATE_BUCKET }}
+          terraform_plan_speculative: false
+          aws_auth_required: true
+          jwt_secret_key: ${{ secrets.JWT_SECRET_KEY }}
+          enable_security_checks: false
+          checkov_enforcement: advisory
+          aws_oidc_role_arn: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          role_session_name_prefix: gha-terraform-untaint
+
+      - name: Untaint resources
+        shell: bash
+        run: |
+          ADDRESSES="${{ inputs.resource_addresses }}"
+          echo "Untainting resources in environment: ${TF_ENV}"
+          echo "Addresses: ${ADDRESSES}"
+          echo ""
+          SUCCESS=0
+          FAILED=0
+          for addr in ${ADDRESSES}; do
+            echo "→ Untainting: ${addr}"
+            if terraform -chdir="environments/${TF_ENV}" untaint "${addr}"; then
+              echo "  ✓ Done"
+              SUCCESS=$((SUCCESS + 1))
+            else
+              echo "  ✗ Failed (resource may not be tainted, or address is wrong)"
+              FAILED=$((FAILED + 1))
+            fi
+          done
+          echo ""
+          echo "Summary: ${SUCCESS} untainted, ${FAILED} failed."
+          if [ "${FAILED}" -gt 0 ]; then
+            exit 1
+          fi
+
+      - name: Workflow summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Terraform Untaint Summary"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| **Environment** | \`${TF_ENV}\` |"
+            echo "| **Resources** | \`${{ inputs.resource_addresses }}\` |"
+            echo "| **Triggered by** | @${{ github.actor }} |"
+            echo "| **Status** | ${{ job.status }} |"
+            echo ""
+            echo "### Next steps"
+            echo "1. Re-run the plan workflow for \`${TF_ENV}\` to generate a fresh plan without the taint."
+            echo "2. Review and approve the plan."
+            echo "3. Run the apply workflow."
+          } >> "$GITHUB_STEP_SUMMARY"

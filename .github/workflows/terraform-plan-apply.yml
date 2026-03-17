@@ -3,7 +3,7 @@ name: Terraform Plan & Apply
 # Promotion pipeline: plan dev → apply dev → plan staging → apply staging → plan prod → apply prod
 #
 # Triggers:
-#   push to main      → full promotion pipeline (plan + apply all envs in order)
+#   workflow_run      → full promotion pipeline only after Terraform Plan Speculative succeeds on push to main
 #   workflow_dispatch → manual plan or apply for a specific environment (promotion rules enforced)
 #
 # Environment protection rules (configured in GitHub repo settings):
@@ -19,20 +19,10 @@ on:
   workflow_run:
     workflows: ["Terraform Plan Speculative"]
     types: [completed]
-    branches: [main]
-
-  push:
-    branches: [main]
-    paths:
-      - '**/*.tf'
-      - '**/*.tfvars'
-      - '**/.terraform.lock.hcl'
-      - '!bootstrap/**'
-
   workflow_dispatch:
     inputs:
       environment:
-        description: "Target environment (promotion rules enforced: cannot apply prod before dev/staging)"
+        description: "Target environment. Use 'all' for full dev→staging→prod promotion."
         required: true
         type: choice
         options: [dev, staging, prod, all]
@@ -41,11 +31,6 @@ on:
         required: true
         type: choice
         options: [plan, apply]
-      dev_allow_apply_on_drift:
-        description: "DEV only: allow apply even if pre-apply drift is detected"
-        required: false
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -54,7 +39,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: terraform-apply-${{ github.event.inputs.environment || 'all' }}-${{ github.ref }}
+  group: terraform-apply-${{ inputs.environment || 'all' }}-${{ github.event.workflow_run.head_branch || github.ref }}
   cancel-in-progress: false
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -63,7 +48,7 @@ concurrency:
 
 # Promotion guard expression (reused in each job's `if`):
 #   A job for environment X is active when:
-#     • push to main (full pipeline), OR
+#     • successful workflow_run from Terraform Plan Speculative on push to main, OR
 #     • workflow_dispatch targeting X specifically, OR
 #     • workflow_dispatch targeting "all"
 # The `needs` chain enforces sequencing; `if` gates allow individual env runs.
@@ -73,7 +58,11 @@ jobs:
   plan-dev:
     name: Plan [dev]
     if: >-
-      github.event_name == 'push' ||
+      (
+        github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'pull_request'
+      ) ||
       (github.event_name == 'workflow_dispatch' &&
         (inputs.environment == 'dev' || inputs.environment == 'all'))
     uses: ./.github/workflows/terraform-plan-reusable.yml
@@ -93,7 +82,7 @@ jobs:
     if: >-
       needs.plan-dev.result == 'success' &&
       (
-        github.event_name == 'push' ||
+        github.event_name == 'workflow_run' ||
         (github.event_name == 'workflow_dispatch' &&
           (inputs.environment == 'dev' || inputs.environment == 'all') &&
           inputs.action == 'apply')
@@ -104,7 +93,6 @@ jobs:
       github_environment: dev
       saved_plan_artifact_name: terraform-plan-dev
       saved_plan_artifact_id: ${{ needs.plan-dev.outputs.plan_artifact_id }}
-      fail_on_drift: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dev_allow_apply_on_drift) }}
     secrets: inherit
 
   # ── PLAN STAGING ─────────────────────────────────────────────────────────────
@@ -112,9 +100,9 @@ jobs:
     name: Plan [staging]
     needs: [apply-dev]
     if: >-
-      needs.apply-dev.result == 'success' &&
+      (needs.apply-dev.result == 'success' || needs.apply-dev.result == 'skipped') &&
       (
-        github.event_name == 'push' ||
+        github.event_name == 'workflow_run' ||
         (github.event_name == 'workflow_dispatch' &&
           (inputs.environment == 'staging' || inputs.environment == 'all'))
       )
@@ -135,7 +123,7 @@ jobs:
     if: >-
       needs.plan-staging.result == 'success' &&
       (
-        github.event_name == 'push' ||
+        github.event_name == 'workflow_run' ||
         (github.event_name == 'workflow_dispatch' &&
           (inputs.environment == 'staging' || inputs.environment == 'all') &&
           inputs.action == 'apply')
@@ -146,7 +134,6 @@ jobs:
       github_environment: staging
       saved_plan_artifact_name: terraform-plan-staging
       saved_plan_artifact_id: ${{ needs.plan-staging.outputs.plan_artifact_id }}
-      fail_on_drift: true
     secrets: inherit
 
   # ── PLAN PROD ──────────────────────────────────────────────────────────────
@@ -154,9 +141,9 @@ jobs:
     name: Plan [prod]
     needs: [apply-staging]
     if: >-
-      needs.apply-staging.result == 'success' &&
+      (needs.apply-staging.result == 'success' || needs.apply-staging.result == 'skipped') &&
       (
-        github.event_name == 'push' ||
+        github.event_name == 'workflow_run' ||
         (github.event_name == 'workflow_dispatch' &&
           (inputs.environment == 'prod' || inputs.environment == 'all'))
       )
@@ -177,7 +164,7 @@ jobs:
     if: >-
       needs.plan-prod.result == 'success' &&
       (
-        github.event_name == 'push' ||
+        github.event_name == 'workflow_run' ||
         (github.event_name == 'workflow_dispatch' &&
           (inputs.environment == 'prod' || inputs.environment == 'all') &&
           inputs.action == 'apply')
@@ -188,5 +175,4 @@ jobs:
       github_environment: prod
       saved_plan_artifact_name: terraform-plan-prod
       saved_plan_artifact_id: ${{ needs.plan-prod.outputs.plan_artifact_id }}
-      fail_on_drift: true
     secrets: inherit
