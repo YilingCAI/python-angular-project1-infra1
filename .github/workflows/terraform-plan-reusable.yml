@@ -60,6 +60,8 @@ on:
         required: true
       TERRAFORM_STATE_BUCKET:
         required: false
+      AWS_OIDC_ROLE_ARN:
+        required: false
       INFRACOST_API_KEY:
         required: false
     outputs:
@@ -77,8 +79,12 @@ jobs:
     name: "Plan [${{ inputs.target_environment }}]${{ inputs.drift && ' (drift)' || inputs.speculative && ' (speculative)' || '' }}"
     runs-on: ubuntu-latest
     concurrency:
-      group: terraform-state-${{ inputs.target_environment }}
-      cancel-in-progress: false
+      # Speculative plans use their own concurrency group per-ref so they can run
+      # in parallel with real applies and cancel each other on new commits.
+      # Real plans and drift use the shared state-lock group (cancel-in-progress: false)
+      # to prevent two writes competing for the same S3 state object.
+      group: ${{ inputs.speculative && format('terraform-speculative-{0}-{1}', inputs.target_environment, github.ref) || format('terraform-state-{0}', inputs.target_environment) }}
+      cancel-in-progress: ${{ inputs.speculative }}
     environment: ${{ inputs.github_environment != '' && inputs.github_environment || inputs.target_environment }}
     env:
       TF_ENV: ${{ inputs.target_environment }}
@@ -86,7 +92,7 @@ jobs:
       plan_artifact_id: ${{ steps.plan_common.outputs.plan_artifact_id }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Terraform common setup and checks
         uses: ./.github/actions/terraform-setup-common
@@ -103,6 +109,31 @@ jobs:
           aws_oidc_role_arn: ${{ secrets.AWS_OIDC_ROLE_ARN }}
           role_session_name_prefix: ${{ inputs.drift && 'gha-terraform-drift' || inputs.speculative && 'gha-terraform-plan-speculative' || 'gha-terraform-plan' }}
 
+      - name: Capture plan-time remote state version
+        id: state_version
+        if: ${{ !inputs.speculative && !inputs.drift }}
+        shell: bash
+        run: |
+          STATE_KEY="${TF_ENV}/terraform.tfstate"
+          BUCKET="${{ secrets.TERRAFORM_STATE_BUCKET }}"
+
+          if [ -z "${BUCKET}" ]; then
+            echo "version_id=unknown" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          VERSION_ID=$(aws s3api list-object-versions \
+            --bucket "${BUCKET}" \
+            --prefix "${STATE_KEY}" \
+            --query "Versions[?IsLatest && Key=='${STATE_KEY}'].VersionId | [0]" \
+            --output text)
+
+          if [ -z "${VERSION_ID}" ] || [ "${VERSION_ID}" = "None" ]; then
+            echo "version_id=none" >> "$GITHUB_OUTPUT"
+          else
+            echo "version_id=${VERSION_ID}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Terraform shared plan steps
         id: plan_common
         uses: ./.github/actions/terraform-plan-common
@@ -114,6 +145,7 @@ jobs:
           enable_infracost: ${{ inputs.speculative && inputs.enable_infracost }}
           infracost_api_key: ${{ secrets.INFRACOST_API_KEY }}
           enable_pr_comment: ${{ inputs.enable_pr_comment }}
+          plan_state_version: ${{ steps.state_version.outputs.version_id || 'unknown' }}
 
       - name: Workflow summary
         if: always() && !inputs.drift

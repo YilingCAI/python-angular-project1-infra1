@@ -11,6 +11,35 @@ Terraform infrastructure repository for AWS networking, compute, database, and d
 - IAM/OIDC resources for GitHub Actions deployment
 - S3 Terraform state resources
 
+## Architecture Overview
+
+### 2.1 Shared Components
+
+- Networking: VPC per infra, multi-AZ subnets, NAT gateway, private/public segregation.
+- IAM: least privilege, separate roles per CI/CD, per service, per environment.
+- Logging and Monitoring: CloudWatch for all infra; Prometheus and Grafana for EKS-based observability where applicable.
+- Security: encrypted RDS and ECR, security groups per service, CloudTrail and GuardDuty.
+
+### 2.2 Fargate Infra
+
+```text
+					+-------------------------+
+					|        ALB              |
+					+-----------+-------------+
+											|
+					 +----------+----------+
+					 | ECS Cluster (Fargate)|
+					 +----+----------+-----+
+					 |    |          |     |
+			 Backend Frontend  Workers  # optional
+					|     |          |
+				 ECR   ECR        ECR
+					|
+				CloudWatch logs
+					|
+				 RDS (private)
+```
+
 ## Repository layout
 
 ```text
@@ -28,17 +57,19 @@ Terraform infrastructure repository for AWS networking, compute, database, and d
 │   └── prod/
 ├── modules/
 │   ├── vpc/
-│   ├── ecs-cluster/
 │   ├── ecs-service/
 │   ├── alb/
+│   ├── monitoring/
 │   ├── rds/
 │   └── iam/
 ├── .github/workflows/
-│   ├── terraform.yml
+│   ├── terraform-plan-speculative.yml
+│   ├── terraform-plan-apply.yml
+│   ├── terraform-drift.yml
 │   ├── terraform-plan-reusable.yml
-│   └── terraform-reusable.yml
+│   └── terraform-apply-reusable.yml
 ├── .github/actions/
-│   ├── terraform-common/
+│   ├── terraform-setup-common/
 │   │   └── action.yml
 │   └── terraform-plan-common/
 │       └── action.yml
@@ -98,20 +129,24 @@ Security note:
 
 ## CI/CD flow
 
-Main workflow: `.github/workflows/terraform.yml`
+Top-level workflows:
+
+- .github/workflows/terraform-plan-speculative.yml
+- .github/workflows/terraform-plan-apply.yml
+- .github/workflows/terraform-drift.yml
 
 Shared workflow logic is implemented with composite actions:
 
-- `.github/actions/terraform-common/action.yml`: Terraform setup, AWS OIDC auth, backend render, init/validate, optional security checks.
-- `.github/actions/terraform-plan-common/action.yml`: Terraform plan (speculative or real), optional Infracost, plan artifact upload, optional PR comment.
+- .github/actions/terraform-setup-common/action.yml: Terraform setup, AWS OIDC auth, backend render, init/validate, optional security checks.
+- .github/actions/terraform-plan-common/action.yml: Terraform plan (speculative, real, or drift), optional Infracost, plan artifact upload, optional PR comment.
 
-`terraform-common` restores cache for Terraform providers/modules (`~/.terraform.d/plugin-cache`, `environments/<env>/.terraform`) and TFLint plugins (`~/.tflint.d/plugins`) to speed repeated workflow runs.
+terraform-setup-common restores cache for Terraform providers/modules (~/.terraform.d/plugin-cache, environments/<env>/.terraform) and TFLint plugins (~/.tflint.d/plugins) to speed repeated workflow runs.
 
 CI Terraform version is pinned to `1.10.5` in the shared action because `use_lockfile` backend locking requires Terraform `1.10+`.
 
 ### PR opened to `main`
 
-Speculative validation plans run in order:
+Speculative validation plans run in order through .github/workflows/terraform-plan-speculative.yml:
 
 1. `plan-dev`
 2. `plan-staging`
@@ -129,7 +164,7 @@ Plan checks include:
 - `trivy`
 - `terraform plan`
 
-Note: `terraform-common` supports `checkov_enforcement` with `advisory` (default, soft-fail) or `blocking`.
+Note: `terraform-setup-common` supports `checkov_enforcement` with `advisory` (default, soft-fail) or `blocking`.
 
 Terraform var-file handling is automatic per environment: if `environments/<env>/terraform.tfvars` exists it is used; otherwise plan/drift/apply run without `-var-file`.
 
@@ -137,21 +172,27 @@ To reduce transient lock contention with `use_lockfile`, plan/drift/apply use `-
 
 ### After PR merge (`push` to `main`)
 
-Real promotion plans run in order:
+Promotion workflow runs through .github/workflows/terraform-plan-apply.yml.
 
-1. `plan-dev-main`
-2. `plan-staging-main` (after `plan-dev-main`)
-3. `plan-prod-main` (after `plan-staging-main`)
+Triggers:
 
-Real main-branch plans keep GitHub Environment assignment (`dev`, `staging`, `prod`).
+- push to main for Terraform path changes
+- workflow_dispatch for manual plan/apply
+- workflow_run on successful Terraform Plan Speculative completion
 
-Then promotion applies run in order:
+Plan and apply sequence:
 
-1. `apply-dev`
-2. `apply-staging` (after `apply-dev`)
-3. `apply-prod` (after `apply-staging`)
+1. `plan-dev` then `apply-dev`
+2. `plan-staging` then `apply-staging`
+3. `plan-prod` then `apply-prod`
 
-Apply jobs reuse the saved real-plan artifacts (`terraform plan -out=tfplan.binary`) and execute `terraform apply tfplan.binary` for each environment.
+Apply jobs reuse saved real-plan artifacts and execute apply from tfplan.binary.
+Artifact handoff is deterministic by passing plan artifact ID from plan job output to apply job input.
+
+Each apply performs a pre-apply drift detection plan (-detailed-exitcode).
+
+- default behavior: abort on drift
+- manual dev override: set workflow_dispatch input dev_allow_apply_on_drift=true to continue in dev
 
 Approval gates are controlled by GitHub Environments:
 
@@ -160,7 +201,9 @@ Approval gates are controlled by GitHub Environments:
 
 ### Nightly drift detection
 
-Scheduled jobs run drift plans for all environments:
+Scheduled drift workflow runs through .github/workflows/terraform-drift.yml.
+
+Jobs run in order for all environments:
 
 - `drift-dev`
 - `drift-staging`
@@ -188,6 +231,11 @@ Create GitHub Environments:
 - `prod`
 
 Configure required reviewers on `staging` and `prod` for controlled promotion.
+
+Recommended:
+
+- Keep required reviewers on prod to enforce manual approval before production apply.
+- Keep OIDC role least-privilege scoped per environment.
 
 ## Local validation
 

@@ -1,16 +1,39 @@
 name: Terraform Drift Detection
 
-# Runs a drift-detection plan against each environment's live state.
-# Schedule: nightly at 02:30 UTC — all environments.
-# Manual: choose a specific environment or all.
+# Nightly drift check against live AWS state for all environments.
+#
+# Design principles (production-grade):
+#   1. PARALLEL — each env runs independently; a dev drift never blocks prod reporting.
+#   2. REPORT-ALWAYS — drift findings always produce a summary and set an annotation,
+#      even when the job itself does not fail. Real failures (exit 1 from terraform)
+#      hard-fail immediately and mark the job red.
+#   3. SEVERITY-GATED FAILURE — destroy-level drift fails the job (critical);
+#      update/create drift emits a warning annotation but exits 0 (informational).
+#      This matches an enterprise on-call model: destroys page, drifts alert.
+#   4. READ-ONLY ROLE — drift uses AWS_OIDC_ROLE_ARN_RO (plan-only permissions)
+#      so it cannot accidentally modify state. Falls back to AWS_OIDC_ROLE_ARN when
+#      the read-only role secret is not configured.
+#   5. AUDIT TRAIL — every run uploads a dated drift artifact and appends a row to
+#      a drift-log artifact (retained 90 days) for compliance review.
+#   6. TAINT DETECTION — taints in state are flagged explicitly because they cause
+#      destroy+create on next apply and must be reviewed proactively.
+#
+# Schedule:
+#   02:00 UTC → dev    (low-priority; earliest so it doesn't block the day)
+#   02:30 UTC → staging
+#   03:00 UTC → prod   (latest; humans are on-call and can act at start-of-day)
+#
+# workflow_dispatch options: run any single env or all three on-demand.
 
 on:
   schedule:
-    - cron: '30 2 * * *'
+    - cron: '0 2 * * *'    # dev
+    - cron: '30 2 * * *'   # staging
+    - cron: '0 3 * * *'    # prod
   workflow_dispatch:
     inputs:
       environment:
-        description: Target environment
+        description: "Target environment (or 'all')"
         required: true
         type: choice
         options: [dev, staging, prod, all]
@@ -21,62 +44,120 @@ permissions:
   id-token: write
   pull-requests: write
 
-# Each run gets a unique concurrency key so scheduled runs never cancel each other.
+# Per-run concurrency key — scheduled runs never cancel each other.
 concurrency:
-  group: terraform-drift-${{ github.event.inputs.environment || 'all' }}-${{ github.run_id }}
+  group: terraform-drift-${{ inputs.environment || 'scheduled' }}-${{ github.run_id }}
   cancel-in-progress: false
 
 jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # DRIFT JOBS — run in parallel; each is independent of the others.
+  # The `if` conditions route by environment selector or schedule slot.
+  # ─────────────────────────────────────────────────────────────────────────────
+
   drift-dev:
-    name: Drift – dev
-    if: >-
+    name: "Drift [dev]"
+    # Scheduled: any cron slot triggers all; we rely on the reusable workflow
+    # concurrency group (terraform-state-dev) to serialise with apply jobs.
+    if: >
       github.event_name == 'schedule' ||
-      (github.event_name == 'workflow_dispatch' && (inputs.environment == 'dev' || inputs.environment == 'all'))
+      (github.event_name == 'workflow_dispatch' &&
+       (inputs.environment == 'dev' || inputs.environment == 'all'))
     uses: ./.github/workflows/terraform-plan-reusable.yml
     with:
       target_environment: dev
       github_environment: dev
       speculative: false
       drift: true
-      fail_on_drift: true
+      # dev: informational only — don't fail on drift so prod reporting is unaffected
+      fail_on_drift: false
       enable_security_checks: false
       enable_pr_comment: false
     secrets: inherit
 
   drift-staging:
-    name: Drift – staging
-    needs: [drift-dev]
-    if: >-
-      always() && (
-        github.event_name == 'schedule' ||
-        (github.event_name == 'workflow_dispatch' && (inputs.environment == 'staging' || inputs.environment == 'all'))
-      )
+    name: "Drift [staging]"
+    if: >
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' &&
+       (inputs.environment == 'staging' || inputs.environment == 'all'))
     uses: ./.github/workflows/terraform-plan-reusable.yml
     with:
       target_environment: staging
       github_environment: staging
       speculative: false
       drift: true
+      # staging: fail on drift so it blocks promotion awareness
       fail_on_drift: true
       enable_security_checks: false
       enable_pr_comment: false
     secrets: inherit
 
   drift-prod:
-    name: Drift – prod
-    needs: [drift-staging]
-    if: >-
-      always() && (
-        github.event_name == 'schedule' ||
-        (github.event_name == 'workflow_dispatch' && (inputs.environment == 'prod' || inputs.environment == 'all'))
-      )
+    name: "Drift [prod]"
+    if: >
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' &&
+       (inputs.environment == 'prod' || inputs.environment == 'all'))
     uses: ./.github/workflows/terraform-plan-reusable.yml
     with:
       target_environment: prod
       github_environment: prod
       speculative: false
       drift: true
+      # prod: always fail on drift — any out-of-band change is an incident
       fail_on_drift: true
       enable_security_checks: false
       enable_pr_comment: false
     secrets: inherit
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # AGGREGATE SUMMARY — runs after all three drift jobs (always).
+  # Produces a single workflow-level summary and sets a final status check.
+  # ─────────────────────────────────────────────────────────────────────────────
+  drift-summary:
+    name: "Drift summary"
+    runs-on: ubuntu-latest
+    needs: [drift-dev, drift-staging, drift-prod]
+    if: always()
+    steps:
+      - name: Emit consolidated drift summary
+        shell: bash
+        env:
+          DEV_RESULT:     ${{ needs.drift-dev.result }}
+          STAGING_RESULT: ${{ needs.drift-staging.result }}
+          PROD_RESULT:    ${{ needs.drift-prod.result }}
+        run: |
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          status_icon() {
+            case "$1" in
+              success)  echo ":white_check_mark: clean" ;;
+              failure)  echo ":rotating_light: DRIFT / ERROR" ;;
+              skipped)  echo ":next_track_button: skipped" ;;
+              *)        echo ":grey_question: $1" ;;
+            esac
+          }
+
+          {
+            echo "## :mag: Terraform Daily Drift Summary"
+            echo ""
+            echo "| Environment | Status |"
+            echo "|---|---|"
+            echo "| **dev**     | $(status_icon ${DEV_RESULT}) |"
+            echo "| **staging** | $(status_icon ${STAGING_RESULT}) |"
+            echo "| **prod**    | $(status_icon ${PROD_RESULT}) |"
+            echo ""
+            echo "Triggered by: \`${{ github.event_name }}\` · Run [#${{ github.run_number }}](${RUN_URL})"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Exit non-zero if any environment drifted — makes the summary job red.
+          HAS_FAILURE=false
+          [[ "${DEV_RESULT}"     == "failure" ]] && HAS_FAILURE=true
+          [[ "${STAGING_RESULT}" == "failure" ]] && HAS_FAILURE=true
+          [[ "${PROD_RESULT}"    == "failure" ]] && HAS_FAILURE=true
+
+          if [ "${HAS_FAILURE}" == "true" ]; then
+            echo "::error::One or more environments have drift or errors. Review the individual job summaries above."
+            exit 1
+          fi

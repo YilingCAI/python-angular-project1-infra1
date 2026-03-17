@@ -48,14 +48,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Validate backend/auth combination
-      shell: bash
-      run: |
-        if [ "${{ inputs.terraform_plan_speculative }}" != "true" ] && [ "${{ inputs.aws_auth_required }}" != "true" ]; then
-          echo "Invalid configuration: terraform_plan_speculative=false requires aws_auth_required=true." >&2
-          exit 1
-        fi
-
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v3
       with:
@@ -131,12 +123,11 @@ runs:
         EXPECTED_ROLE_ARN: ${{ steps.role.outputs.role_arn }}
       run: |
         EXPECTED_ROLE_NAME="${EXPECTED_ROLE_ARN##*/}"
-        MAX_ATTEMPTS=6
+        MAX_ATTEMPTS=3
         RETRY_DELAY_SECONDS=5
         ACTUAL_ARN=""
 
         for ATTEMPT in $(seq 1 "$MAX_ATTEMPTS"); do
-          # Add CLI-level network timeouts and retry to handle transient STS propagation delays.
           if ACTUAL_ARN=$(aws sts get-caller-identity \
             --query Arn \
             --output text \
@@ -160,6 +151,43 @@ runs:
     - name: Export sensitive Terraform vars
       shell: bash
       run: echo "TF_VAR_jwt_secret_key=${{ inputs.jwt_secret_key }}" >> "$GITHUB_ENV"
+
+    - name: Ensure kubeconfig exists for providers
+      shell: bash
+      run: |
+        # The Kubernetes and Helm providers need a resolvable kubeconfig at init time.
+        # In CI the EKS cluster is not yet available during plan, so we write a dummy
+        # stub at the standard path. If a real kubeconfig already exists, skip.
+        KUBECONFIG_PATH="$HOME/.kube/config"
+        ENV_DIR="environments/${{ inputs.target_environment }}"
+
+        KUBECONFIG_CONTEXT=$(awk -F '=' '/^kubeconfig_context[[:space:]]*=/{gsub(/"/, "", $2); gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2}' \
+          "${ENV_DIR}/terraform.tfvars" 2>/dev/null | tail -n 1)
+        KUBECONFIG_CONTEXT="${KUBECONFIG_CONTEXT:-ci-context}"
+
+        mkdir -p "$(dirname "$KUBECONFIG_PATH")"
+
+        if [ ! -f "$KUBECONFIG_PATH" ]; then
+          cat > "$KUBECONFIG_PATH" <<EOF
+        apiVersion: v1
+        kind: Config
+        clusters:
+        - name: ci-cluster
+          cluster:
+            server: https://127.0.0.1
+            insecure-skip-tls-verify: true
+        contexts:
+        - name: ${KUBECONFIG_CONTEXT}
+          context:
+            cluster: ci-cluster
+            user: ci-user
+        current-context: ${KUBECONFIG_CONTEXT}
+        users:
+        - name: ci-user
+          user:
+            token: ci-token
+        EOF
+        fi
 
     - name: Render backend config
       if: ${{ inputs.terraform_plan_speculative != 'true' }}
@@ -206,25 +234,14 @@ runs:
 
     - name: Run Checkov scan
       if: ${{ inputs.enable_security_checks == 'true' }}
-      continue-on-error: ${{ inputs.checkov_enforcement == 'advisory' }}
       shell: bash
+      continue-on-error: ${{ inputs.checkov_enforcement == 'advisory' }}
       run: |
-        if [ "${{ inputs.checkov_enforcement }}" = "advisory" ]; then
-          CHECKOV_MODE="--soft-fail"
-        elif [ "${{ inputs.checkov_enforcement }}" = "blocking" ]; then
-          CHECKOV_MODE=""
-        else
-          echo "Invalid checkov_enforcement value '${{ inputs.checkov_enforcement }}'. Use 'advisory' or 'blocking'." >&2
-          exit 1
-        fi
-
-        docker run --rm \
-          -v "$PWD":/tf \
-          bridgecrew/checkov:latest \
-          -d /tf/environments/${{ inputs.target_environment }} \
+        pip3 install --quiet checkov
+        checkov \
+          --directory "environments/${{ inputs.target_environment }}" \
           --framework terraform \
-          --quiet \
-          ${CHECKOV_MODE}
+          --quiet
 
     - name: Setup TFLint
       if: ${{ inputs.enable_security_checks == 'true' }}

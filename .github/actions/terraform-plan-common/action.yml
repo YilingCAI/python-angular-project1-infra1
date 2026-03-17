@@ -33,6 +33,10 @@ inputs:
     description: Post plan output comment to PR
     required: false
     default: "false"
+  plan_state_version:
+    description: Remote state version ID captured at plan time (for stale-plan detection)
+    required: false
+    default: "unknown"
 
 outputs:
   plan_artifact_id:
@@ -82,17 +86,37 @@ runs:
           -out="tfplan.binary" \
           -no-color 2>&1 | tee "environments/${{ inputs.target_environment }}/plan-output.txt"
 
+        cat > "environments/${{ inputs.target_environment }}/plan-metadata.env" <<EOF
+        PLAN_STATE_VERSION=${{ inputs.plan_state_version }}
+        PLAN_SHA=${{ github.sha }}
+        PLAN_RUN_ID=${{ github.run_id }}
+        PLAN_RUN_ATTEMPT=${{ github.run_attempt }}
+        PLAN_ENVIRONMENT=${{ inputs.target_environment }}
+        PLAN_GENERATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        EOF
+
     # ── Drift-detection plan ──────────────────────────────────────────────────
-    # Uses -detailed-exitcode: 0=no changes, 1=error, 2=changes/drift.
-    # We capture the exit code and store it for downstream reporting/failing.
-    - name: Terraform drift plan
+    # Uses -refresh-only -detailed-exitcode, which ONLY detects out-of-band
+    # changes made directly in AWS (console, CLI, other tools). A full
+    # `terraform plan -detailed-exitcode` would also flag intended-but-not-yet-
+    # applied Terraform changes as "drift", producing false positives on every
+    # branch until it is applied. -refresh-only avoids that entirely.
+    #
+    # Exit codes: 0 = no drift, 1 = plan error, 2 = out-of-band drift detected.
+    #
+    # Additionally we inspect state for tainted resources. Taints are not
+    # detected by -refresh-only (they exist only in state, not in AWS) but
+    # they cause a destroy+create on next apply and must be flagged proactively.
+    - name: Terraform drift plan (-refresh-only)
       if: ${{ inputs.drift_plan == 'true' }}
       id: drift
       shell: bash
       run: |
         PLAN_FILE="environments/${{ inputs.target_environment }}/plan-output.txt"
         PLAN_EXIT=0
+
         terraform -chdir="environments/${{ inputs.target_environment }}" plan \
+          -refresh-only \
           -detailed-exitcode \
           ${{ steps.vars.outputs.var_file_arg }} \
           -lock-timeout=5m \
@@ -105,7 +129,43 @@ runs:
           echo "::error::Terraform plan errored for environment ${{ inputs.target_environment }}. See logs."
           exit 1
         fi
-        # Exit 2 = drift; do NOT exit here — let summary/artifact steps run first.
+        # Exit 2 = out-of-band drift; do NOT exit here — let summary/artifact
+        # steps run first so we always produce a visible report.
+
+    # Inspect state (not plan) for tainted resources. These are separate from
+    # drift but equally dangerous: they encode a destroy+create for a live
+    # resource and must be resolved before the next apply runs.
+    - name: Detect tainted resources in state
+      if: ${{ inputs.drift_plan == 'true' }}
+      id: taint_state
+      shell: bash
+      run: |
+        TAINTED=$(terraform -chdir="environments/${{ inputs.target_environment }}" \
+          state list 2>/dev/null \
+          | while read -r addr; do
+              terraform -chdir="environments/${{ inputs.target_environment }}" \
+                state show "${addr}" 2>/dev/null \
+                | grep -q 'status.*tainted' && echo "${addr}" || true
+            done || true)
+
+        # Faster alternative using the JSON state file if available
+        # (terraform show -json does not expose taint; state pull does)
+        if [ -z "${TAINTED}" ]; then
+          TAINTED=$(terraform -chdir="environments/${{ inputs.target_environment }}" \
+            state pull 2>/dev/null \
+            | jq -r '[.resources[].instances[]
+                | select(.status == "tainted")
+                | .attributes.id // "unknown"] | join(" ")' 2>/dev/null || echo "")
+        fi
+
+        if [ -n "${TAINTED}" ]; then
+          echo "::warning::Tainted resources in ${{ inputs.target_environment }} state: ${TAINTED}"
+          echo "has_tainted=true" >> "$GITHUB_OUTPUT"
+          echo "tainted_list=${TAINTED}" >> "$GITHUB_OUTPUT"
+        else
+          echo "has_tainted=false" >> "$GITHUB_OUTPUT"
+          echo "tainted_list=" >> "$GITHUB_OUTPUT"
+        fi
 
     - name: Upload drift artifact
       if: ${{ inputs.drift_plan == 'true' }}
@@ -113,7 +173,7 @@ runs:
       with:
         name: terraform-drift-${{ inputs.target_environment }}
         path: environments/${{ inputs.target_environment }}/plan-output.txt
-        retention-days: 30
+        retention-days: 90
 
     - name: Write drift job summary
       if: ${{ inputs.drift_plan == 'true' }}
@@ -121,6 +181,8 @@ runs:
       run: |
         PLAN_FILE="environments/${{ inputs.target_environment }}/plan-output.txt"
         PLAN_EXIT="${{ steps.drift.outputs.plan_exit }}"
+        HAS_TAINTED="${{ steps.taint_state.outputs.has_tainted }}"
+        TAINTED_LIST="${{ steps.taint_state.outputs.tainted_list }}"
         RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
         {
@@ -132,12 +194,32 @@ runs:
           echo "| **Triggered by** | \`${{ github.event_name }}\` |"
           echo "| **Commit** | [\`${GITHUB_SHA::8}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}) |"
           echo "| **Run** | [#${{ github.run_number }}](${RUN_URL}) |"
+          echo "| **Scan type** | \`-refresh-only\` — out-of-band AWS changes only |"
           echo ""
         } >> "$GITHUB_STEP_SUMMARY"
 
+        # ── Taint section (always shown when taints exist) ────────────────
+        if [ "${HAS_TAINTED}" == "true" ]; then
+          {
+            echo "### :warning: Tainted resources in state"
+            echo ""
+            echo "The following resources are marked \`tainted\` in Terraform state."
+            echo "They will be **destroyed and recreated** on the next \`terraform apply\`."
+            echo "Run the **Terraform Untaint** workflow before applying to prevent data loss."
+            echo ""
+            echo "| Resource address |"
+            echo "|---|"
+            for addr in ${TAINTED_LIST}; do
+              echo "| \`${addr}\` |"
+            done
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+        # ── Drift section ─────────────────────────────────────────────────
         if [ "${PLAN_EXIT}" = "0" ]; then
           {
-            echo "### :white_check_mark: No drift detected"
+            echo "### :white_check_mark: No out-of-band drift detected"
             echo ""
             echo "Infrastructure in \`${{ inputs.target_environment }}\` matches Terraform state."
           } >> "$GITHUB_STEP_SUMMARY"
@@ -148,13 +230,24 @@ runs:
           TO_CHANGE=$(echo "${SUMMARY_LINE}"  | grep -oP '\d+(?= to change)'  || echo "0")
           TO_DESTROY=$(echo "${SUMMARY_LINE}" | grep -oP '\d+(?= to destroy)' || echo "0")
 
-          DRIFTED_RESOURCES=$(grep -E "^  # .+ will be (updated|destroyed|created|replaced)" "${PLAN_FILE}" \
-            | sed -E 's/^  # (.+) will be.*/\1/' \
+          # Severity: any destroy = critical, otherwise warning
+          if [ "${TO_DESTROY}" -gt 0 ] 2>/dev/null; then
+            SEVERITY_ICON=":red_circle: **CRITICAL**"
+            echo "::error::CRITICAL drift in ${{ inputs.target_environment }}: ${TO_DESTROY} resource(s) will be destroyed if left unreconciled."
+          else
+            SEVERITY_ICON=":yellow_circle: Warning"
+            echo "::warning::Drift detected in ${{ inputs.target_environment }}: ${TO_ADD} add / ${TO_CHANGE} change."
+          fi
+
+          DRIFTED_RESOURCES=$(grep -E "^  # .+ has changed" "${PLAN_FILE}" \
+            | sed -E 's/^  # (.+) has changed/\1/' \
             | sort \
             || true)
 
           {
-            echo "### :rotating_light: Drift detected"
+            echo "### :rotating_light: Out-of-band drift detected"
+            echo ""
+            echo "**Severity: ${SEVERITY_ICON}**"
             echo ""
             echo "**${SUMMARY_LINE}**"
             echo ""
@@ -178,11 +271,14 @@ runs:
 
           {
             echo ""
-            echo "> :paperclip: Full diff available in artifact **\`terraform-drift-${{ inputs.target_environment }}\`**"
+            echo "> :paperclip: Full diff in artifact **\`terraform-drift-${{ inputs.target_environment }}\`** (retained 90 days)"
             echo ""
-            echo "> **Action required:** Review the drift and either:"
-            echo "> 1. Run \`terraform apply\` to reconcile state, or"
-            echo "> 2. Import / update Terraform config to reflect the intentional change."
+            echo "#### Remediation options"
+            echo "| Option | When to use |"
+            echo "|---|---|"
+            echo "| Run \`terraform apply\` via the plan+apply pipeline | The AWS change was accidental; revert to IaC state |"
+            echo "| Update Terraform config + import resource | The AWS change is intentional; codify it |"
+            echo "| Use **Terraform Untaint** workflow | Resource is tainted but healthy — remove taint only |"
           } >> "$GITHUB_STEP_SUMMARY"
 
         else
@@ -227,6 +323,7 @@ runs:
           environments/${{ inputs.target_environment }}/plan.tfplan
           environments/${{ inputs.target_environment }}/plan.json
           environments/${{ inputs.target_environment }}/tfplan.binary
+          environments/${{ inputs.target_environment }}/plan-metadata.env
           environments/${{ inputs.target_environment }}/infracost.json
 
     - name: Post plan to PR
