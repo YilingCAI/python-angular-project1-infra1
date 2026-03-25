@@ -1,253 +1,172 @@
 # mypythonproject1-infra
 
-Terraform infrastructure repository for AWS networking, compute, database, and deployment prerequisites.
+Professional infrastructure repository for mypythonproject1 using Terraform on AWS ECS Fargate.
 
-## Provisioned resources
+## Project Overview
 
-- VPC with public/private/db subnets
-- ALB and listeners
-- ECS cluster and services for backend/frontend
-- RDS PostgreSQL
-- IAM/OIDC resources for GitHub Actions deployment
-- S3 Terraform state resources
+This repository provisions the core AWS platform for the application, including networking, load balancing, compute services, database, and IAM controls for CI/CD.
 
-## Architecture Overview
+It is designed with environment isolation and promotion flow across dev, staging, and production.
 
-### 2.1 Shared Components
+## Architecture Flow
 
-- Networking: VPC per infra, multi-AZ subnets, NAT gateway, private/public segregation.
-- IAM: least privilege, separate roles per CI/CD, per service, per environment.
-- Logging and Monitoring: CloudWatch for all infra; Prometheus and Grafana for EKS-based observability where applicable.
-- Security: encrypted RDS and ECR, security groups per service, CloudTrail and GuardDuty.
+ALB -> ECS services (frontend and backend) -> RDS PostgreSQL
 
-### 2.2 Fargate Infra
+## Architecture Diagram
 
 ```text
-					+-------------------------+
-					|        ALB              |
-					+-----------+-------------+
-											|
-					 +----------+----------+
-					 | ECS Cluster (Fargate)|
-					 +----+----------+-----+
-					 |    |          |     |
-			 Backend Frontend  Workers  # optional
-					|     |          |
-				 ECR   ECR        ECR
-					|
-				CloudWatch logs
-					|
-				 RDS (private)
+Internet Users
+	|
+	v
++-------------------------------+
+| Application Load Balancer     |
+|  - Listeners: 80 / 443        |
+|  - Host/path routing           |
++---------------+---------------+
+		    |
+		    v
++-----------------------------------------------+
+| ECS Cluster (Fargate)                         |
+|                                               |
+|  +---------------------+  +-----------------+ |
+|  | Frontend Service    |  | Backend Service | |
+|  | Angular + Nginx     |  | Python API      | |
+|  +---------------------+  +-----------------+ |
++-------------------------------+---------------+
+					  |
+					  v
+				+------------------+
+				| AWS RDS Postgres |
+				+------------------+
 ```
 
-## Repository layout
+## Provisioned Components
 
-```text
-.
-├── bootstrap/
-│   ├── env/
-│   │   └── bootstrap.tfvars
-│   ├── main.tf
-│   ├── variables.tf
-│   ├── outputs.tf
-│   └── provider.tf
-├── environments/
-│   ├── dev/
-│   ├── staging/
-│   └── prod/
-├── modules/
-│   ├── vpc/
-│   ├── ecs-service/
-│   ├── alb/
-│   ├── monitoring/
-│   ├── rds/
-│   └── iam/
-├── .github/workflows/
-│   ├── terraform-plan-speculative.yml
-│   ├── terraform-plan-apply.yml
-│   ├── terraform-drift.yml
-│   ├── terraform-plan-reusable.yml
-│   └── terraform-apply-reusable.yml
-├── .github/actions/
-│   ├── terraform-setup-common/
-│   │   └── action.yml
-│   └── terraform-plan-common/
-│       └── action.yml
-└── Makefile
-```
+- VPC and subnet topology (public, private, database)
+- Application Load Balancer and listener rules
+- ECS services for backend and frontend
+- RDS PostgreSQL and related security resources
+- IAM roles and policies for runtime and CI/CD
+- Monitoring resources and shared platform controls
 
-## State and locking model
+## Terraform Structure
 
-Each environment uses isolated remote state in S3 with backend lockfiles enabled:
+Infrastructure is split into reusable modules and environment roots.
 
-- `dev`: `mypythonproject1-tfstate-dev`
-- `staging`: `mypythonproject1-tfstate-staging`
-- `prod`: `mypythonproject1-tfstate-prod`
+### Modules
 
-`backend.hcl` files are rendered during CI and for local use contain:
+- modules/vpc: VPC, subnets, routing, internet/NAT components
+- modules/alb: ALB, listeners, target groups, and ingress routing
+- modules/ecs-service: ECS task/service and autoscaling definitions
+- modules/rds: PostgreSQL database and data-plane security resources
+- modules/iam: IAM roles and policies for workload and pipeline access
+- modules/monitoring: telemetry, logging, and operational visibility resources
 
-```hcl
-bucket         = "<env-state-bucket>"
-key            = "<env>/terraform.tfstate"
-region         = "us-east-1"
-use_lockfile   = true
-encrypt        = true
-```
+### Environment roots
 
-## Bootstrap (per AWS account)
+Each environment root under environments/dev, environments/staging, and environments/prod contains:
 
-Bootstrap creates shared foundation resources (state buckets, OIDC role/provider, ECR repos).
+- main.tf
+- variables.tf
+- outputs.tf
+- providers.tf
+- backend.hcl
+- terraform.tfvars
 
-Run from repo root:
+## Repository Structure
+
+| Path | Purpose |
+|---|---|
+| environments/dev/ | Development Terraform root |
+| environments/staging/ | Staging Terraform root |
+| environments/prod/ | Production Terraform root |
+| modules/vpc/ | Network module |
+| modules/alb/ | Ingress and load balancing module |
+| modules/ecs-service/ | ECS service module |
+| modules/rds/ | Database module |
+| modules/iam/ | IAM and access controls |
+| modules/monitoring/ | Monitoring and observability resources |
+| .github/workflows/ | Plan, apply, drift, and utility workflows |
+
+## Environment Model
+
+Each environment has a dedicated Terraform root with its own:
+
+- backend.hcl
+- terraform.tfvars
+- provider and variable settings
+
+This keeps state, parameters, and promotion behavior isolated per environment.
+
+## Deployment Steps
 
 ```bash
-make bootstrap-init
-make bootstrap-plan
-make bootstrap-apply
+# Initialize Terraform
+terraform -chdir=environments/staging init
+
+# Plan
+terraform -chdir=environments/staging plan
+
+# Apply
+terraform -chdir=environments/staging apply
 ```
 
-Bootstrap variables are in `bootstrap/env/bootstrap.tfvars`.
+## CI/CD Strategy
 
-## Local AWS credentials (safe setup)
+- Pull requests run speculative plan and quality checks.
+- Main branch promotion follows ordered plan/apply across environments.
+- Drift detection runs on schedule to identify out-of-band changes.
+- Manual approval gates are expected for staging and production applies.
 
-This repo uses a local file named `.aws.local.env` for bootstrap-related AWS credentials.
+## Security Groups Model
 
-1. Create your local file from the template:
+- ALB security group:
+	- Inbound: 80/443 from internet
+	- Outbound: app traffic to ECS service security groups
+- ECS service security groups:
+	- Inbound: service ports only from ALB security group
+	- Outbound: restricted egress to required dependencies
+- RDS security group:
+	- Inbound: PostgreSQL port only from backend ECS security group
 
-```bash
-cp .aws.local.env.example .aws.local.env
-```
+## Scaling Strategy
 
-2. Edit `.aws.local.env` with real values from your AWS account.
+- Horizontal scaling is handled at service level by adjusting desired task counts.
+- ALB distributes requests across healthy ECS tasks.
+- Independent scaling for frontend and backend supports workload-specific tuning.
+- Environment-specific task sizing balances cost and reliability per stage.
 
-3. If you use temporary credentials, set `AWS_SESSION_TOKEN` as well.
-
-Security note:
-
-- `.aws.local.env` is intentionally gitignored.
-- Never commit real credentials to git history.
-
-## CI/CD flow
-
-Top-level workflows:
-
-- .github/workflows/terraform-plan-speculative.yml
-- .github/workflows/terraform-plan-apply.yml
-- .github/workflows/terraform-drift.yml
-
-Shared workflow logic is implemented with composite actions:
-
-- .github/actions/terraform-setup-common/action.yml: Terraform setup, AWS OIDC auth, backend render, init/validate, optional security checks.
-- .github/actions/terraform-plan-common/action.yml: Terraform plan (speculative, real, or drift), optional Infracost, plan artifact upload, optional PR comment.
-
-terraform-setup-common restores cache for Terraform providers/modules (~/.terraform.d/plugin-cache, environments/<env>/.terraform) and TFLint plugins (~/.tflint.d/plugins) to speed repeated workflow runs.
-
-CI Terraform version is pinned to `1.10.5` in the shared action because `use_lockfile` backend locking requires Terraform `1.10+`.
-
-### PR opened to `main`
-
-Speculative validation plans run in order through .github/workflows/terraform-plan-speculative.yml:
-
-1. `plan-dev`
-2. `plan-staging`
-3. `plan-prod`
-
-These run with `speculative_plan: true` (no saved plan artifact for apply handoff and no state lock).
-Speculative PR plans run without GitHub Environment assignment.
-
-Plan checks include:
-
-- `terraform fmt -check`
-- `terraform validate`
-- `checkov`
-- `tflint`
-- `trivy`
-- `terraform plan`
-
-Note: `terraform-setup-common` supports `checkov_enforcement` with `advisory` (default, soft-fail) or `blocking`.
-
-Terraform var-file handling is automatic per environment: if `environments/<env>/terraform.tfvars` exists it is used; otherwise plan/drift/apply run without `-var-file`.
-
-To reduce transient lock contention with `use_lockfile`, plan/drift/apply use `-lock-timeout=5m` in CI.
-
-### After PR merge (`push` to `main`)
-
-Promotion workflow runs through .github/workflows/terraform-plan-apply.yml.
-
-Triggers:
-
-- push to main for Terraform path changes
-- workflow_dispatch for manual plan/apply
-- workflow_run on successful Terraform Plan Speculative completion
-
-Plan and apply sequence:
-
-1. `plan-dev` then `apply-dev`
-2. `plan-staging` then `apply-staging`
-3. `plan-prod` then `apply-prod`
-
-Apply jobs reuse saved real-plan artifacts and execute apply from tfplan.binary.
-Artifact handoff is deterministic by passing plan artifact ID from plan job output to apply job input.
-
-Each apply performs a pre-apply drift detection plan (-detailed-exitcode).
-
-- default behavior: abort on drift
-- manual dev override: set workflow_dispatch input dev_allow_apply_on_drift=true to continue in dev
-
-Approval gates are controlled by GitHub Environments:
-
-- `staging` environment approval gates `apply-staging`
-- `prod` environment approval gates `apply-prod`
-
-### Nightly drift detection
-
-Scheduled drift workflow runs through .github/workflows/terraform-drift.yml.
-
-Jobs run in order for all environments:
-
-- `drift-dev`
-- `drift-staging`
-- `drift-prod`
-
-With `fail_on_drift: true`, a drift result fails that environment job and uploads artifacts for investigation.
-
-## Required GitHub configuration
-
-Repository variables:
-
-- `AWS_REGION`
-
-Repository/environment secrets:
-
-- `AWS_OIDC_ROLE_ARN`
-- `TERRAFORM_STATE_BUCKET`
-- `JWT_SECRET_KEY`
-- `INFRACOST_API_KEY` (optional)
-
-Create GitHub Environments:
-
-- `dev`
-- `staging`
-- `prod`
-
-Configure required reviewers on `staging` and `prod` for controlled promotion.
-
-Recommended:
-
-- Keep required reviewers on prod to enforce manual approval before production apply.
-- Keep OIDC role least-privilege scoped per environment.
-
-## Local validation
+## Local Validation
 
 ```bash
-terraform fmt -check -recursive
+terraform -chdir=environments/dev init -backend=false
 terraform -chdir=environments/dev validate
+
+terraform -chdir=environments/staging init -backend=false
 terraform -chdir=environments/staging validate
+
+terraform -chdir=environments/prod init -backend=false
 terraform -chdir=environments/prod validate
 ```
 
-## Dependabot
+## Tech Stack
 
-Dependabot config: `.github/dependabot.yml`.
+- Terraform
+- AWS ECS Fargate
+- AWS Application Load Balancer
+- AWS RDS PostgreSQL
+- AWS IAM
+- GitHub Actions
 
-Dependabot opens update PRs, then the same PR validation and promotion controls apply.
+## Security and Operations Notes
+
+- Use OIDC-based role assumption in CI/CD instead of long-lived credentials.
+- Keep backend state encrypted and protected with locking.
+- Protect production workflows with GitHub Environment approvals.
+
+## Future Improvements
+
+- Add blue/green deployment options for ECS services.
+- Add policy-as-code and OPA checks in plan stage.
+- Add cost guardrails and budget-aware deployment policies.
+- Add expanded SLO alerting and incident automation.
